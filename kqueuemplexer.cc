@@ -98,7 +98,7 @@ int KqueueFDMultiplexer::run(struct timeval* now)
   if(ret < 0 && errno!=EINTR)
     throw FDMultiplexerException("kqueue returned error: "+stringerror());
 
-  if(ret==0) // nothing
+  if(ret < 0) // nothing - thanks AB!
     return 0;
 
   d_inrun=true;
@@ -107,6 +107,7 @@ int KqueueFDMultiplexer::run(struct timeval* now)
     d_iter=d_readCallbacks.find(d_kevents[n].ident);
     if(d_iter != d_readCallbacks.end()) {
       d_iter->second.d_callback(d_iter->first, d_iter->second.d_parameter);
+      continue; // so we don't find ourselves as writable again
     }
 
     d_iter=d_writeCallbacks.find(d_kevents[n].ident);

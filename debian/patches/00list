@@ -1,4 +1,3 @@
 # Apply following patches
-man_rec_control.1
-predictable-dns-query
-predictable-ports
+gcc-4.2-ftbfs-fix
+do-not-strip-binaries

@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2005  PowerDNS.COM BV
+    Copyright (C) 2005 - 2007 PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 as 
@@ -27,6 +27,26 @@ using namespace boost;
 RecordTextReader::RecordTextReader(const string& str, const string& zone) : d_string(str), d_zone(zone), d_pos(0), d_end(str.size())
 {
 }
+
+void RecordTextReader::xfr48BitInt(uint64_t &val)
+{
+  xfr64BitInt(val);
+}
+
+void RecordTextReader::xfr64BitInt(uint64_t &val)
+{
+  skipSpaces();
+
+  if(!isdigit(d_string.at(d_pos)))
+    throw RecordTextException("expected digits at position "+lexical_cast<string>(d_pos)+" in '"+d_string+"'");
+
+  char *endptr;
+  unsigned long ret=strtoull(d_string.c_str() + d_pos, &endptr, 10);
+  val=ret;
+  
+  d_pos = endptr - d_string.c_str();
+}
+
 
 void RecordTextReader::xfr32BitInt(uint32_t &val)
 {
@@ -66,11 +86,40 @@ void RecordTextReader::xfrIP(uint32_t &val)
 
   if(!isdigit(d_string.at(d_pos)))
     throw RecordTextException("while parsing IP address, expected digits at position "+lexical_cast<string>(d_pos)+" in '"+d_string+"'");
+
+  uint32_t octet=0;
+  val=0;
+  char count=0;
   
-  string ip;
-  xfrLabel(ip);
-  if(!IpToU32(ip, &val))
-    throw RecordTextException("unable to parse IP address '"+ip+"'");
+  for(;;) {
+    if(d_string.at(d_pos)=='.') {
+      val<<=8;
+      val+=octet;
+      octet=0;
+      count++;
+      if(count > 3)
+	break;
+    }
+    else if(isdigit(d_string.at(d_pos))) {
+      octet*=10;
+      octet+=d_string.at(d_pos) - '0';
+      if(octet > 255)
+	throw RecordTextException("unable to parse IP address");
+    }
+    else if(dns_isspace(d_string.at(d_pos))) 
+      break;
+    else
+      throw RecordTextException("unable to parse IP address, strange character: "+d_string.at(d_pos));
+
+    d_pos++;
+    if(d_pos == d_string.length())
+      break;
+  }
+  if(count<=3) {
+    val<<=8;
+    val+=octet;
+  }
+  val=ntohl(val);
 }
 
 
@@ -105,10 +154,10 @@ void RecordTextReader::xfrLabel(string& val, bool)
 
   const char* strptr=d_string.c_str();
   while(d_pos < d_end) {
-    if(dns_isspace(strptr[d_pos]))
+    if(strptr[d_pos]!='\r' && dns_isspace(strptr[d_pos]))
       break;
 
-    if(strptr[d_pos]=='\\' && d_pos < d_end - 1) 
+    if(strptr[d_pos]=='\\' && d_pos < d_end - 1 && strptr[d_pos+1]!='.')  // leave the \. escape around
       d_pos++;
 
     val.append(1, strptr[d_pos]);      
@@ -127,7 +176,7 @@ void RecordTextReader::xfrLabel(string& val, bool)
   }
 }
 
-void RecordTextReader::xfrBlob(string& val)
+void RecordTextReader::xfrBlob(string& val, int)
 {
   skipSpaces();
   int pos=(int)d_pos;
@@ -177,25 +226,33 @@ void RecordTextReader::xfrHexBlob(string& val)
   HEXDecode(d_string.c_str()+pos, d_string.c_str() + d_pos, val);
 }
 
-
-void RecordTextReader::xfrText(string& val)
+void RecordTextReader::xfrText(string& val, bool multi)
 {
-  skipSpaces();
-  if(d_string[d_pos]!='"')
-    throw RecordTextException("Data field in DNS should start with quote (\") at position "+lexical_cast<string>(d_pos)+" of '"+d_string+"'");
-
   val.clear();
   val.reserve(d_end - d_pos);
-  
-  while(++d_pos < d_end && d_string[d_pos]!='"') {
-    if(d_string[d_pos]=='\\' && d_pos+1!=d_end) {
-      ++d_pos;
+
+  while(d_pos != d_end) {
+    if(!val.empty())
+      val.append(1, ' ');
+
+    skipSpaces();
+    if(d_string[d_pos]!='"')
+      throw RecordTextException("Data field in DNS should start with quote (\") at position "+lexical_cast<string>(d_pos)+" of '"+d_string+"'");
+
+    val.append(1, '"');
+    while(++d_pos < d_end && d_string[d_pos]!='"') {
+      if(d_string[d_pos]=='\\' && d_pos+1!=d_end) {
+	val.append(1, d_string[d_pos++]);
+      }
+      val.append(1, d_string[d_pos]);
     }
-    val.append(1, d_string[d_pos]);
+    val.append(1,'"');
+    if(d_pos == d_end)
+      throw RecordTextException("Data field in DNS should end on a quote (\") in '"+d_string+"'");
+    d_pos++;
+    if(!multi)
+      break;
   }
-  if(d_pos == d_end)
-    throw RecordTextException("Data field in DNS should end on a quote (\") in '"+d_string+"'");
-  d_pos++;
 }
 
 void RecordTextReader::xfrType(uint16_t& val)
@@ -227,7 +284,7 @@ RecordTextWriter::RecordTextWriter(string& str) : d_string(str)
   d_string.clear();
 }
 
-void RecordTextWriter::xfr32BitInt(const uint32_t& val)
+void RecordTextWriter::xfr48BitInt(const uint64_t& val)
 {
   if(!d_string.empty())
     d_string.append(1,' ');
@@ -235,6 +292,12 @@ void RecordTextWriter::xfr32BitInt(const uint32_t& val)
 }
 
 
+void RecordTextWriter::xfr32BitInt(const uint32_t& val)
+{
+  if(!d_string.empty())
+    d_string.append(1,' ');
+  d_string+=lexical_cast<string>(val);
+}
 
 void RecordTextWriter::xfrType(const uint16_t& val)
 {
@@ -250,13 +313,30 @@ void RecordTextWriter::xfrIP(const uint32_t& val)
     d_string.append(1,' ');
 
   char tmp[17];
-  snprintf(tmp, sizeof(tmp)-1, "%u.%u.%u.%u", 
-	   (val >> 24)&0xff,
-	   (val >> 16)&0xff,
-	   (val >>  8)&0xff,
-	   (val      )&0xff);
-  
-  d_string+=tmp;
+  uint32_t ip=htonl(val);
+  uint8_t vals[4];
+
+  memcpy(&vals[0], &ip, sizeof(ip));
+
+  char *pos=tmp;
+
+  for(int n=0; n < 4; ++n) {
+    if(vals[n]<10) {
+      *(pos++)=vals[n]+'0';
+    } else if(vals[n] < 100) {
+      *(pos++)=(vals[n]/10) +'0';
+      *(pos++)=(vals[n]%10) +'0';
+    } else {
+      *(pos++)=(vals[n]/100) +'0';
+      vals[n]%=100;
+      *(pos++)=(vals[n]/10) +'0';
+      *(pos++)=(vals[n]%10) +'0';
+    }
+    if(n!=3)
+      *(pos++)='.';
+  }
+  *pos=0;
+  d_string.append(tmp, pos);
 }
 
 
@@ -316,7 +396,7 @@ void RecordTextWriter::xfrLabel(const string& val, bool)
   //  d_string.append(1,'.');
 }
 
-void RecordTextWriter::xfrBlob(const string& val)
+void RecordTextWriter::xfrBlob(const string& val, int)
 {
   if(!d_string.empty())
     d_string.append(1,' ');
@@ -337,25 +417,12 @@ void RecordTextWriter::xfrHexBlob(const string& val)
   }
 }
 
-void RecordTextWriter::xfrText(const string& val)
+void RecordTextWriter::xfrText(const string& val, bool multi)
 {
   if(!d_string.empty())
     d_string.append(1,' ');
-  d_string.append(1,'"');
 
-  if(val.find_first_of("\\\"") == string::npos)
-    d_string+=val;
-  else {
-    string::size_type end=val.size();
-    
-    for(string::size_type pos=0; pos < end; ++pos) {
-      if(val[pos]=='\'' || val[pos]=='"')
-	d_string.append(1,'\\');
-      d_string.append(1, val[pos]);
-    }
-  }
-
-  d_string.append(1,'"');
+  d_string.append(val);
 }
 
 

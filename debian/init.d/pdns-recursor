@@ -36,11 +36,10 @@ fi
 
 start() {
 # Return
-#  0 if daemon has been started
-#  1 if daemon was already running
-#  2 if daemon could not be started
-  start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON --test > /dev/null || return 1
-  start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON -- --daemon || return 2
+#  0 if daemon has been started / was already running
+#  >0 if daemon could not be started
+  start-stop-daemon --start --oknodo --quiet --pidfile $PIDFILE --exec $DAEMON --test > /dev/null || return 0
+  start-stop-daemon --start --oknodo --quiet --pidfile $PIDFILE --exec $DAEMON || return 2
 }
 
 start_resolvconf() {
@@ -51,18 +50,8 @@ start_resolvconf() {
 }
 
 stop() {
-# Return
-#  0 if daemon has been stopped
-#  1 if daemon was already stopped
-#  2 if daemon could not be stopped
-#  other if a failure occured
-  start-stop-daemon --stop --quiet --retry=HUP/30/TERM/5/KILL/5 --pidfile $PIDFILE --name $NAME
-  RETVAL="$?"
-  [ "$RETVAL" = 2 ] && return 2
-  start-stop-daemon --stop --quiet --oknodo --retry=HUP/30/KILL/5 --exec $DAEMON
-  [ "$?" = 2 ] && return 2
-  rm -f $PIDFILE
-  return "$RETVAL"
+  start-stop-daemon --stop --oknodo --quiet --retry=TERM/5/KILL/5 --pidfile $PIDFILE --name $NAME
+  rm -f $PIDFILE	# just in case
 }
 
 stop_resolvconf() {

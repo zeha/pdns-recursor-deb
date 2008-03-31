@@ -1,20 +1,52 @@
-pdns-recursor (3.1.4-1+etch2) stable-security; urgency=high
-  
-  * Use the strong PRNG for UDP source port numbers, too.
+pdns-recursor (3.1.5-1) unstable; urgency=low
 
-  * Change IP address of L.ROOT-SERVERS.NET.
+  * New upstream version.
 
- -- Florian Weimer <fw@deneb.enyo.de>  Fri, 11 Jul 2008 23:19:30 +0200
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Mon, 31 Mar 2008 21:51:59 +0200
 
-pdns-recursor (3.1.4-1+etch1) stable-security; urgency=high
+pdns-recursor (3.1.4-6) unstable; urgency=low
 
-  * Weak random numbers were used for transaction IDs and source port
-    numbers, simplifying cache poisoning using spoofed upstream server
-    answers. (CVE-2008-1637)
-  
-    NOTE: This change does did not actually harden source port numbers.
+  * Standards-Version 3.7.3.0
+  * Remove pdns_hw too on cleanup.
+  * Fix for truncating long TXT queries (Closes: #462114)
+  * Don't ignore build errors (Closes: #462128)
+  * Build option noopt was inoperative (Closes: #462126)
+  * Added gcc 4.3 fixes from upstream (Closes: #455631)
 
- -- Florian Weimer <fw@deneb.enyo.de>  Wed, 09 Apr 2008 21:40:00 +0200
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Wed, 13 Feb 2008 22:49:08 +0100
+
+pdns-recursor (3.1.4-5) unstable; urgency=low
+
+  * daemon=no is now working if used in /etc/powerdns/recursor.conf
+    (Closes: #440020)
+  * patch added to reflect change of L root server (Closes: #449483)
+  * Makefile patched to prevent stripping of binaries (Closes: #437765)
+
+ -- Christoph Haas <haas@debian.org>  Fri, 09 Nov 2007 21:57:58 +0100
+
+pdns-recursor (3.1.4-4) unstable; urgency=low
+
+  * Update to debhelper 5.
+  * Fix lintian warning: debian-rules-sets-DH_COMPAT.
+  * Restore the changelog, it was partly removed by accident. (Closes: #421393)
+  * Fix FTBFS with gcc-4.2 (Closes: #387113)
+
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Sun, 03 Jun 2007 15:11:22 +0200
+
+pdns-recursor (3.1.4-3) unstable; urgency=low
+
+  * Stop/stop script does not return an error code when being called as
+    'stop' when the service is actually not running. (Closes: #406428)
+
+ -- Debian PowerDNS Maintainers <powerdns-debian@workaround.org>  Wed, 21 Feb 2007 23:10:00 +0200
+
+pdns-recursor (3.1.4-2) unstable; urgency=medium
+
+  * Run pdns-recursor by default as non-privileged user. (Closes: #399669)
+  * swapcontext is supported by kfreebsd (Fixes a FTBFS) (Closes: #403746)
+  * Added lsb-base to the dependencies. (Closes: #402732)
+
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Mon, 25 Dec 2006 14:00:10 +0100
 
 pdns-recursor (3.1.4-1) unstable; urgency=medium
 

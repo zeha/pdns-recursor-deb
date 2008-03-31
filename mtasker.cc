@@ -298,16 +298,17 @@ template<class Key, class Val>bool MTasker<Key,Val>::schedule(unsigned int now)
     //    waiters_by_ttd_index_t& ttdindex=d_waiters.template get<KeyTag>();
     waiters_by_ttd_index_t& ttdindex=boost::multi_index::get<KeyTag>(d_waiters);
 
-
     for(typename waiters_by_ttd_index_t::iterator i=ttdindex.begin(); i != ttdindex.end(); ) {
       if(i->ttd && (unsigned int)i->ttd < now) {
 	d_waitstatus=TimeOut;
-	if(swapcontext(&d_kernel,i->context)) { // swaps back to the above point 'A'
+	ucontext_t* uc = i->context;
+	ttdindex.erase(i++);                  // removes the waitpoint 
+
+	if(swapcontext(&d_kernel, uc)) { // swaps back to the above point 'A'
 	  perror("swapcontext in schedule2");
 	  exit(EXIT_FAILURE);
 	}
-	delete i->context;              
-	ttdindex.erase(i++);                  // removes the waitpoint 
+	delete uc;
       }
       else if(i->ttd)
 	break;

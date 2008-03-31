@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2002 - 2006  PowerDNS.COM BV
+    Copyright (C) 2002 - 2008  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
@@ -34,6 +34,7 @@
 #include "misc.hh"
 #include <boost/tuple/tuple.hpp>
 #include <boost/tuple/tuple_comparison.hpp>
+#include <boost/lexical_cast.hpp>
 
 using namespace std;
 
@@ -119,7 +120,7 @@ union ComboAddress {
     }
   }
 
-  bool isMappedIPv4()  
+  bool isMappedIPv4()  const
   {
     if(sin4.sin_family!=AF_INET6)
       return false;
@@ -137,7 +138,7 @@ union ComboAddress {
     return true;
   }
   
-  ComboAddress mapToIPv4()  
+  ComboAddress mapToIPv4() const
   {
     if(!isMappedIPv4())
       throw AhuException("ComboAddress can't map non-mapped IPv6 address back to IPv4");
@@ -161,6 +162,14 @@ union ComboAddress {
       return tmp;
       
     return tmp;
+  }
+
+  string toStringWithPort() const
+  {
+    if(sin4.sin_family==AF_INET)
+      return toString() + ":" + boost::lexical_cast<string>(ntohs(sin4.sin_port));
+    else
+      return "["+toString() + "]:" + boost::lexical_cast<string>(ntohs(sin4.sin_port));
   }
 };
 
@@ -198,13 +207,17 @@ public:
       d_bits = (uint8_t) atoi(split.second.c_str());
       if(d_bits<32)
 	d_mask=~(0xFFFFFFFF>>d_bits);
+      else
+	d_mask=0xFFFFFFFF;
     }
     else if(d_network.sin4.sin_family==AF_INET) {
       d_bits = 32;
       d_mask = 0xFFFFFFFF;
     }
-    else 
+    else {
       d_bits=128;
+      d_mask=0;  // silence silly warning - d_mask is unused for IPv6
+    }
   }
 
   bool match(const ComboAddress& ip) const
@@ -253,6 +266,11 @@ public:
     return (ip & d_mask) == (ntohl(d_network.sin4.sin_addr.s_addr) & d_mask);
   }
 
+  string toString() const
+  {
+    return d_network.toString()+"/"+boost::lexical_cast<string>(d_bits);
+  }
+
 private:
   ComboAddress d_network;
   uint32_t d_mask;
@@ -266,7 +284,7 @@ class NetmaskGroup
 {
 public:
   //! If this IP address is matched by any of the classes within
-  bool match(ComboAddress *ip)
+  bool match(const ComboAddress *ip)
   {
     for(container_t::const_iterator i=d_masks.begin();i!=d_masks.end();++i)
       if(i->match(ip) || (ip->isMappedIPv4() && i->match(ip->mapToIPv4()) ))
@@ -284,6 +302,23 @@ public:
   {
     return d_masks.empty();
   }
+
+  unsigned int size()
+  {
+    return (unsigned int)d_masks.size();
+  }
+
+  string toString() const
+  {
+    ostringstream str;
+    for(container_t::const_iterator iter = d_masks.begin(); iter != d_masks.end(); ++iter) {
+      if(iter != d_masks.begin())
+	str <<", ";
+      str<<iter->toString();
+    }
+    return str.str();
+  }
+
 
 private:
   typedef vector<Netmask> container_t;

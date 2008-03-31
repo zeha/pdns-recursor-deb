@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2005  PowerDNS.COM BV
+    Copyright (C) 2005 - 2007  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 as 
@@ -74,6 +74,40 @@ private:
   string d_mxname;
 };
 
+class KXRecordContent : public DNSRecordContent
+{
+public:
+  KXRecordContent(uint16_t preference, const string& exchanger);
+
+  includeboilerplate(KX)
+
+private:
+  uint16_t d_preference;
+  string d_exchanger;
+};
+
+class IPSECKEYRecordContent : public DNSRecordContent
+{
+public:
+  IPSECKEYRecordContent(uint16_t preference, uint8_t gatewaytype, uint8_t algo, const std::string& gateway, const std::string &publickey);
+
+  includeboilerplate(IPSECKEY)
+
+private:
+  uint8_t d_preference, d_gatewaytype, d_algorithm;
+  string d_gateway, d_publickey;
+};
+
+class DHCIDRecordContent : public DNSRecordContent
+{
+public:
+  includeboilerplate(DHCID)
+
+private:
+  string d_content;
+};
+
+
 class SRVRecordContent : public DNSRecordContent
 {
 public:
@@ -84,6 +118,22 @@ public:
 private:
   uint16_t d_preference, d_weight, d_port;
   string d_target;
+};
+
+class TSIGRecordContent : public DNSRecordContent
+{
+public:
+  includeboilerplate(TSIG)
+
+  string d_algoName;
+  uint64_t d_time; // 48 bits
+  uint16_t d_fudge;
+  //  uint16_t d_macSize;
+  string d_mac;
+  uint16_t d_origID;
+  uint16_t d_eRcode;
+  // uint16_t d_otherLen
+  string d_otherData;
 };
 
 
@@ -131,6 +181,15 @@ public:
 
 private:
   string d_content;
+};
+
+class MRRecordContent : public DNSRecordContent
+{
+public:
+  includeboilerplate(MR)
+
+private:
+  string d_alias;
 };
 
 
@@ -195,6 +254,28 @@ private:
   uint8_t d_algorithm, d_fptype;
   string d_fingerprint;
 };
+
+class KEYRecordContent : public DNSRecordContent
+{
+public:
+  includeboilerplate(KEY)
+
+private:
+  uint16_t d_flags;
+  uint8_t d_protocol, d_algorithm;
+  string d_certificate;
+};
+
+class AFSDBRecordContent : public DNSRecordContent
+{
+public:
+  includeboilerplate(AFSDB)
+
+private:
+  uint16_t d_subtype;
+  string d_hostname;
+};
+
 
 class CERTRecordContent : public DNSRecordContent
 {
@@ -263,7 +344,24 @@ public:
 private:
 };
 
+class LOCRecordContent : public DNSRecordContent
+{
+public:
+  static void report(void);
+  LOCRecordContent() : DNSRecordContent(ns_t_loc)
+  {}
+  LOCRecordContent(const string& content, const string& zone="");
 
+  static DNSRecordContent* make(const DNSRecord &dr, PacketReader& pr);
+  static DNSRecordContent* make(const string& content);
+  string getZoneRepresentation() const;
+  void toPacket(DNSPacketWriter& pw);
+
+  uint8_t d_version, d_size, d_horizpre, d_vertpre;
+  uint32_t d_latitude, d_longitude, d_altitude;
+  
+private:
+};
 
 #define boilerplate(RNAME, RTYPE)                                                                         \
 RNAME##RecordContent::DNSRecordContent* RNAME##RecordContent::make(const DNSRecord& dr, PacketReader& pr) \

@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2002  PowerDNS.COM BV
+    Copyright (C) 2002 - 2007 PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
@@ -29,7 +29,7 @@
 bool QType::uninit=true;
 vector<QType::namenum> QType::names;
 
-void QType::insert(char *p, int n)
+void QType::insert(const char *p, int n)
 {
   names.push_back(make_pair(string(p),n));
 }
@@ -44,24 +44,33 @@ QType::QType()
       insert("NS",2);
       insert("CNAME",5);
       insert("SOA",6);
+      insert("MR",9);
       insert("PTR",12);
       insert("HINFO",13);
       insert("MX",15);
       insert("TXT",16);
       insert("RP",17);
+      insert("AFSDB", 18);
       insert("SIG",24);
       insert("KEY",25);
       insert("AAAA",28);
       insert("LOC",29);
       insert("SRV",33);
+      insert("CERT", 37);
       insert("A6",38);
       insert("NAPTR",35);
+      insert("DS", 43);
+      insert("SSHFP", 44);
+      insert("RRSIG", 46);
+      insert("DNSKEY", 48);
       insert("SPF",99);
+      insert("IXFR",251);
       insert("AXFR",252);
       insert("ANY",255);
       insert("URL",256);
       insert("MBOXFW",257);
       insert("CURL",258);
+      insert("ADDR",259);
     }
 }
 

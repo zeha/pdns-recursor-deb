@@ -4,6 +4,24 @@
 
 set -e
 
+case "$1" in
+  configure)
+    if [ -z "`getent group pdns`" ]; then
+      addgroup --quiet --system pdns
+    fi
+    if [ -z "`getent passwd pdns`" ]; then
+      echo -n "Creating user and group pdns..."
+      adduser --quiet --system --home /var/spool/powerdns --shell /bin/false --ingroup pdns --disabled-password --disabled-login --gecos "PowerDNS" pdns
+      echo "done"
+    fi
+  ;;
+
+  *)
+    echo "postinst called with unknown argument \`$1'" >&2
+    exit 1
+  ;;
+esac
+
 # Remove old stuff (Coming from before 2.9.17) if Sarge is not supported anymore
 # this can be replaced by dh_installinit in debian/rules.
 if [ -f /etc/init.d/pdns_recursor ]; then

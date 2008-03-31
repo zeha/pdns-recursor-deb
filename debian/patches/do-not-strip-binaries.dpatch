@@ -1,0 +1,23 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## do-not-strip-binaries.dpatch by Christoph Haas <haas@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: Prevent stripping binaries upstream. Should be done by dh_strip.
+
+@DPATCH@
+diff -urNad trunk~/Makefile trunk/Makefile
+--- trunk~/Makefile	2007-11-09 22:41:01.000000000 +0100
++++ trunk/Makefile	2007-11-09 22:45:18.000000000 +0100
+@@ -54,10 +54,10 @@
+ install: all
+ 	-mkdir -p $(DESTDIR)/$(SBINDIR)
+ 	mv pdns_recursor $(DESTDIR)/$(SBINDIR)
+-	strip $(DESTDIR)/$(SBINDIR)/pdns_recursor
++	#strip $(DESTDIR)/$(SBINDIR)/pdns_recursor
+ 	mkdir -p $(DESTDIR)/$(BINDIR)
+ 	mv rec_control $(DESTDIR)/$(BINDIR)
+-	strip $(DESTDIR)/$(BINDIR)/rec_control
++	#strip $(DESTDIR)/$(BINDIR)/rec_control
+ 	-mkdir -p $(DESTDIR)/$(CONFIGDIR)
+ 	$(DESTDIR)/$(SBINDIR)/pdns_recursor --config > $(DESTDIR)/$(CONFIGDIR)/recursor.conf-dist
+ 	-mkdir -p $(DESTDIR)/usr/share/man/man1

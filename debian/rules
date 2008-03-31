@@ -2,9 +2,6 @@
 # 
 # debian/rules file
 
-# Environment
-export DH_COMPAT=4
-
 # These are used for cross-compiling and for saving the configure script
 # from having to guess our platform (since we know it already)
 DEB_HOST_GNU_TYPE   ?= $(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)
@@ -14,19 +11,20 @@ CXXFLAGS = -Wall -g
 CFLAGS = -Wall -g
 
 ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
-	CFLAGS += -O0
-	CXXFLAGS += -O0
+	OPTFLAGS += -O0
 else
-	CFLAGS += -O2
-	CXXFLAGS += -O2
+	OPTFLAGS += -O3
 endif
 
+export CXXFLAGS CFLAGS OPTFLAGS
+
 # Targets
+configure: configure-stamp
 configure-stamp:
 	dh_testdir
 	
 	# Add here commands to configure the package.
-	CFLAGS="$(CFLAGS)" CXXFLAGS="$(CXXFLAGS)" ./configure
+	./configure
 	
 	touch configure-stamp
 
@@ -34,7 +32,7 @@ build: patch build-stamp
 build-stamp: configure
 	
 	# Add here commands to compile the arch part of the package.
-	-$(MAKE) 
+	$(MAKE) 
 	
 	touch build-stamp
 
@@ -45,10 +43,9 @@ clean1:
 	rm -f build-stamp configure-stamp
 	
 	# Add here commands to clean up after the build process.
-	rm -rf dep *.o *~ pdns_recursor rec_control optional/*.o optional
+	rm -rf dep *.o *~ pdns_recursor pdns_hw rec_control optional/*.o optional
 	dh_clean
 
-install:
 install: build
 	dh_testdir
 	dh_testroot
@@ -89,4 +86,4 @@ unpatch:
 	rm -rf patch-stamp debian/patched
 
 binary: binary-arch binary-indep
-.PHONY: build clean binary-indep binary-arch binary install
+.PHONY: build clean binary-indep binary-arch binary install configure clean1 unpatch
