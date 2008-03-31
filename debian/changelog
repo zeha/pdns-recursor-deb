@@ -1,8 +1,12 @@
-pdns-recursor (3.1.5-1) unstable; urgency=low
+pdns-recursor (3.1.7-1) unstable; urgency=low
 
-  * New upstream version.
+  * New upstream version (Closes: #490069) (Closes: #477130)
+  * init.d scripts gets socket-dir information from recursor.conf
+    (Closes: #471568)
+  * Added config file directives
+  * Set dont-query to nothing so it won't break pre-3.1.7 configs. (Closes: #476841)
 
- -- Matthijs Mohlmann <matthijs@cacholong.nl>  Mon, 31 Mar 2008 21:51:59 +0200
+ -- Christoph Haas <haas@debian.org>  Mon, 31 Mar 2008 21:51:59 +0200
 
 pdns-recursor (3.1.4-6) unstable; urgency=low
 

@@ -9,7 +9,8 @@
 ### END INIT INFO
 
 #
-# Author:	Matthijs Mohlmann <matthijs@cacholong.nl>.
+# Authors:	Matthijs Mohlmann <matthijs@cacholong.nl>
+#           Christoph Haas <haas@debian.org>
 # 
 # Thanks to:
 # Thomas Hood <jdthood@aglu.demon.nl>
@@ -24,7 +25,11 @@ PATH=/sbin:/bin:/usr/sbin:/usr/bin
 DESC="PowerDNS recursor"
 NAME=pdns_recursor
 DAEMON=/usr/sbin/$NAME
-PIDFILE=/var/run/$NAME.pid
+# Derive the socket-dir setting from /etc/powerdns/recursor.conf
+# or fall back to the default /var/run if not specified there.
+PIDDIR=$(awk -F= '/^socket-dir=/ {print $2}' /etc/powerdns/recursor.conf)
+if [ -z "$PIDDIR" ]; then PIDDIR=/var/run; fi
+PIDFILE=$SOCKETDIR/$NAME.pid
 
 # Gracefully exit if the package has been removed.
 test -x $DAEMON || exit 0
@@ -52,6 +57,11 @@ start_resolvconf() {
 stop() {
   start-stop-daemon --stop --oknodo --quiet --retry=TERM/5/KILL/5 --pidfile $PIDFILE --name $NAME
   rm -f $PIDFILE	# just in case
+}
+
+force-stop () {
+    killall -v -9 pdns_recursor
+    echo "killed"
 }
 
 stop_resolvconf() {
@@ -142,7 +152,7 @@ case "$1" in
     esac
   ;;
   *)
-    echo "Usage: $0 {start|stop|restart|force-reload}" >&2
+    echo "Usage: $0 {start|stop|restart|force-reload|force-stop}" >&2
     exit 3
   ;;
 esac
