@@ -1,0 +1,51 @@
+This is the Debian prepackaged version of pDNS, the PowerDNS
+nameserver.
+
+pDNS can be downloaded from http://www.powerdns.com/
+
+Copyright and license:
+
+    Copyright 2002 PowerDNS.COM BV
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of version 2 of the GNU General Public License as
+    published by the Free Software Foundation.
+
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+On Debian systems, the complete text of the GNU General Public License 
+can be found in /usr/share/common-licenses/GPL-2
+
+In addition, the included AES implementation comes with the following
+copyright statement:
+
+---------------------------------------------------------------------------
+Copyright (c) 1998-2007, Brian Gladman, Worcester, UK. All rights reserved.
+
+LICENSE TERMS
+
+The free distribution and use of this software is allowed (with or without
+changes) provided that:
+
+ 1. source code distributions include the above copyright notice, this
+    list of conditions and the following disclaimer;
+
+ 2. binary distributions include the above copyright notice, this list
+    of conditions and the following disclaimer in their documentation;
+
+ 3. the name of the copyright holder is not used to endorse products
+    built using this software without specific written permission.
+
+DISCLAIMER
+
+This software is provided 'as is' with no explicit or implied warranties
+in respect of its properties, including, but not limited to, correctness
+and/or fitness for purpose.
+---------------------------------------------------------------------------

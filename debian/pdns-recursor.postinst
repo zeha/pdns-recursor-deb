@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+#
+
+set -e
+
+# Remove old stuff (Coming from before 2.9.17) if Sarge is not supported anymore
+# this can be replaced by dh_installinit in debian/rules.
+if [ -f /etc/init.d/pdns_recursor ]; then
+  if [ -x /usr/sbin/invoke-rc.d ]; then
+    invoke-rc.d pdns_recursor stop || exit $?
+  else
+    /etc/init.d/pdns_recursor stop || exit $?
+  fi
+  update-rc.d -f pdns_recursor remove >/dev/null 2>&1
+  rm -f /etc/init.d/pdns_recursor
+fi
+
+if [ -x "/etc/init.d/pdns-recursor" ]; then
+  update-rc.d pdns-recursor defaults 19 85 >/dev/null
+  if [ -x /usr/sbin/invoke-rc.d ]; then
+    invoke-rc.d pdns-recursor start || exit $?
+  else
+    /etc/init.d/pdns-recursor start || exit $?
+  fi
+fi
+
+#DEBHELPER#
+
+exit 0
+

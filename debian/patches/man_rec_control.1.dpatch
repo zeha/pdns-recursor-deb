@@ -1,0 +1,17 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## man_rec_control.1 by Christoph Haas <haas@debian.org>
+##
+## DP: The man page for rec_control contained a non-ASCII character for the
+## DP: copyright sign.
+
+@DPATCH@
+diff -urNad trunk~/rec_control.1 trunk/rec_control.1
+--- trunk~/rec_control.1	2006-04-25 17:18:12.000000000 +0200
++++ trunk/rec_control.1	2006-05-11 22:18:54.000000000 +0200
+@@ -86,5 +86,5 @@
+ .SH "COPYING"
+ 
+ 
+-Copyright © 2006 PowerDNS\&.COM BV\&. Free use of this software is granted under the terms of the GNU General Public License (GPL) version 2\&.
++Copyright (C) 2006 PowerDNS\&.COM BV\&. Free use of this software is granted under the terms of the GNU General Public License (GPL) version 2\&.
+ 

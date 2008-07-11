@@ -1,0 +1,79 @@
+pdns-recursor (3.1.4-1+etch2) stable-security; urgency=high
+  
+  * Use the strong PRNG for UDP source port numbers, too.
+
+  * Change IP address of L.ROOT-SERVERS.NET.
+
+ -- Florian Weimer <fw@deneb.enyo.de>  Fri, 11 Jul 2008 23:19:30 +0200
+
+pdns-recursor (3.1.4-1+etch1) stable-security; urgency=high
+
+  * Weak random numbers were used for transaction IDs and source port
+    numbers, simplifying cache poisoning using spoofed upstream server
+    answers. (CVE-2008-1637)
+  
+    NOTE: This change does did not actually harden source port numbers.
+
+ -- Florian Weimer <fw@deneb.enyo.de>  Wed, 09 Apr 2008 21:40:00 +0200
+
+pdns-recursor (3.1.4-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Sun, 12 Nov 2006 23:52:20 +0100
+
+pdns-recursor (3.1.3-3) unstable; urgency=low
+
+  [ Matthijs Mohlmann ]
+  * Don't build pdns-recursor for the following architectures: arm, mips,
+    mipsel, hppa and sparc. No support for swapcontext system call.
+    (Closes: #395801)
+  * Fix a big endian problem with TCP processing large answers.
+  * Fix a crash on any record we couldn't properly print for whatever reason.
+
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Sun, 29 Oct 2006 17:50:34 +0100
+
+pdns-recursor (3.1.3-2) unstable; urgency=low
+
+  * Added patch to close a connectionless socket on an error.
+  * Added patch to fix a FD leak.
+  * Added missing lsb keyword Short-Description.
+
+ -- Debian PowerDNS Maintainers <powerdns-debian@workaround.org>  Sun,  1 Oct 2006 14:52:46 +0200
+
+pdns-recursor (3.1.3-1) unstable; urgency=low
+
+  * New upstream release.
+  * Make a lsb compliant init script, fixes a lintian warning.
+
+ -- Debian PowerDNS Maintainers <powerdns-debian@workaround.org>  Thu, 14 Sep 2006 21:20:56 +0200
+
+pdns-recursor (3.1.2-2) unstable; urgency=low
+
+  * Added patch to fix crashes on 64bit platforms (Closes: #380403)
+  * Added patch to prevent overwriting of auth data by unauth data.
+  * Fix a small memleak.
+
+ -- Debian PowerDNS Maintainers <powerdns-debian@workaround.org>  Sun,  6 Aug 2006 13:20:45 +0200
+
+pdns-recursor (3.1.2-1) unstable; urgency=low
+
+  * New upstream release.
+  * Drop build-with-g++-4.1 patch. g++ 4.1 is default now. (Closes: #376696)
+  * Fixed minor typo in recursor.conf (Closes: #369957)
+  * Add logcheck rule for pdns-recursor to suppress logcheck warnings.
+    (Closes: #367702)
+
+ -- Debian PowerDNS Maintainers <powerdns-debian@workaround.org>  Tue,  4 Jul 2006 19:16:19 +0200
+
+pdns-recursor (3.1.1-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Debian PowerDNS Maintainers <powerdns-debian@workaround.org>  Wed, 24 May 2006 19:41:09 +0200
+
+pdns-recursor (3.0.1-1) unstable; urgency=low
+
+  * New upstream release (Closes: #366681)
+
+ -- Debian PowerDNS Maintainers <powerdns-debian@workaround.org>  Tue, 25 Apr 2006 21:27:26 +0200
