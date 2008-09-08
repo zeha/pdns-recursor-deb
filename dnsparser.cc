@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2005 - 2006  PowerDNS.COM BV
+    Copyright (C) 2005 - 2008  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 as 
@@ -19,6 +19,7 @@
 #include "dnsparser.hh"
 #include "dnswriter.hh"
 #include <boost/lexical_cast.hpp>
+#include <boost/algorithm/string.hpp>
 
 using namespace boost;
 
@@ -53,9 +54,9 @@ public:
     string tmp((char*)&*d_record.begin(), d_record.size());
     vector<string> parts;
     stringtok(parts, tmp);
-    if(parts.size()!=3)
+    if(parts.size()!=3 && !(parts.size()==2 && equals(parts[1],"0")) )
       throw MOADNSException("Unknown record was stored incorrectly, need 3 fields, got "+lexical_cast<string>(parts.size())+": "+tmp );
-    const string& relevant=parts[2];
+    const string& relevant=(parts.size() > 2) ? parts[2] : "";
     unsigned int total=atoi(parts[1].c_str());
     if(relevant.size()!=2*total)
       throw runtime_error("invalid unknown record");
@@ -178,7 +179,7 @@ void MOADNSParser::init(const char *packet, unsigned int len)
   
   memcpy(&d_header, packet, sizeof(dnsheader));
 
-  if(d_header.opcode)
+  if(d_header.opcode!=0 && d_header.opcode != 4) // notification
     throw MOADNSException("Can't parse non-query packet with opcode="+ lexical_cast<string>(d_header.opcode));
 
   d_header.qdcount=ntohs(d_header.qdcount);
@@ -205,7 +206,7 @@ void MOADNSParser::init(const char *packet, unsigned int len)
     struct dnsrecordheader ah;
     vector<unsigned char> record;
     validPacket=true;
-    for(n=0;n < d_header.ancount + d_header.nscount + d_header.arcount; ++n) {
+    for(n=0;n < (unsigned int)(d_header.ancount + d_header.nscount + d_header.arcount); ++n) {
       DNSRecord dr;
       
       if(n < d_header.ancount)
@@ -258,7 +259,7 @@ void MOADNSParser::init(const char *packet, unsigned int len)
 
 bool MOADNSParser::getEDNSOpts(EDNSOpts* eo)
 {
-  if(d_header.arcount && !d_answers.empty()) {
+  if(d_header.arcount && !d_answers.empty() && d_answers.back().first.d_type == QType::OPT) {
     eo->d_packetsize=d_answers.back().first.d_class;
 
     EDNS0Record stuff;
@@ -313,6 +314,21 @@ void PacketReader::copyRecord(unsigned char* dest, uint16_t len)
   d_pos+=len;
 }
 
+void PacketReader::xfr48BitInt(uint64_t& ret)
+{
+  ret=0;
+  ret+=d_content.at(d_pos++);
+  ret<<=8;
+  ret+=d_content.at(d_pos++);
+  ret<<=8;
+  ret+=d_content.at(d_pos++);
+  ret<<=8;
+  ret+=d_content.at(d_pos++);
+  ret<<=8;
+  ret+=d_content.at(d_pos++);
+  ret<<=8;
+  ret+=d_content.at(d_pos++);
+}
 
 uint32_t PacketReader::get32BitInt()
 {
@@ -358,16 +374,45 @@ string PacketReader::getLabel(unsigned int recurs)
   return ret;
 }
 
-string PacketReader::getText()
+static string txtEscape(const string &name)
+{
+  string ret;
+
+  for(string::const_iterator i=name.begin();i!=name.end();++i)
+    if(*i=='"' || *i=='\\'){
+      ret += '\\';
+      ret += *i;
+    }
+    else
+      ret += *i;
+  return ret;
+}
+
+// exceptions thrown here do not result in logging in the main pdns auth server - just so you know!
+string PacketReader::getText(bool multi)
 {
   string ret;
   ret.reserve(40);
+  while(d_pos < d_startrecordpos + d_recordlen ) {
+    if(!ret.empty()) {
+      ret.append(1,' ');
+    }
+    unsigned char labellen=d_content.at(d_pos++);
+    
+    ret.append(1,'"');
+    if(labellen) { // no need to do anything for an empty string
+      string val(&d_content.at(d_pos), &d_content.at(d_pos+labellen-1)+1);
+      ret.append(txtEscape(val)); // the end is one beyond the packet
+    }
+    ret.append(1,'"');
+    d_pos+=labellen;
+    if(!multi)
+      break;
+  }
 
-  unsigned char labellen=d_content.at(d_pos++);
-  ret.append(&d_content.at(d_pos), &d_content.at(d_pos+labellen-1)+1); // the end is one beyond the packet
-  d_pos+=labellen;
   return ret;
 }
+
 
 void PacketReader::getLabelFromContent(const vector<uint8_t>& content, uint16_t& frompos, string& ret, int recurs) 
 {
@@ -377,7 +422,6 @@ void PacketReader::getLabelFromContent(const vector<uint8_t>& content, uint16_t&
   for(;;) {
     unsigned char labellen=content.at(frompos++);
 
-    //    cerr<<"ret: '"<<ret<<"', Labellen: "<<(int)labellen<<endl;
     if(!labellen) {
       if(ret.empty())
       	ret.append(1,'.');
@@ -389,10 +433,14 @@ void PacketReader::getLabelFromContent(const vector<uint8_t>& content, uint16_t&
       return getLabelFromContent(content, offset, ret, ++recurs);
     }
     else {
-      // should check for . here and replace by \.
-      ret.append(&content.at(frompos), &content.at(frompos+labellen));
+      // XXX FIXME THIS MIGHT BE VERY SLOW!
+      ret.reserve(ret.size() + labellen + 2);
+      for(string::size_type n = 0 ; n < labellen; ++n, frompos++) {
+	if(content.at(frompos)=='.')
+	  ret.append(1, '\\');
+	ret.append(1, content[frompos]);
+      }
       ret.append(1,'.');
-      frompos+=labellen;
     }
   }
 }
@@ -404,7 +452,46 @@ void PacketReader::xfrBlob(string& blob)
   d_pos = d_startrecordpos + d_recordlen;
 }
 
+void PacketReader::xfrBlob(string& blob, int length)
+{
+  blob.assign(&d_content.at(d_pos), &d_content.at(d_pos + length ) );
+
+  d_pos += length;
+}
+
+
 void PacketReader::xfrHexBlob(string& blob)
 {
   xfrBlob(blob);
+}
+
+string simpleCompress(const string& label, const string& root)
+{
+  typedef vector<pair<unsigned int, unsigned int> > parts_t;
+  parts_t parts;
+  vstringtok(parts, label, ".");
+  string ret;
+  ret.reserve(label.size()+4);
+  for(parts_t::const_iterator i=parts.begin(); i!=parts.end(); ++i) {
+    if(!root.empty() && !strncasecmp(root.c_str(), label.c_str() + i->first, 1 + label.length() - i->first)) { // also match trailing 0, hence '1 +'
+      const char rootptr[2]={0xc0,0x11};
+      ret.append(rootptr, 2);
+      return ret;
+    }
+    ret.append(1, (char)(i->second - i->first));
+    ret.append(label.c_str() + i->first, i->second - i->first);
+  }
+  ret.append(1, (char)0);
+  return ret;
+}
+
+
+void simpleExpandTo(const string& label, unsigned int frompos, string& ret)
+{
+  unsigned int labellen=0;
+  while((labellen=label.at(frompos++))) {
+    ret.append(label.c_str()+frompos, labellen);
+    ret.append(1,'.');
+    frompos+=labellen;
+  }
 }

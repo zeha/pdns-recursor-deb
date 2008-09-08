@@ -22,7 +22,7 @@
 #define UTILITY_HH
 
 #ifndef WIN32
-# include "config.h"
+// # include "config.h"
 #endif // WIN32
 
 #ifdef _MSC_VER
@@ -117,7 +117,6 @@ public:
 
   //! Retrieves the semaphore value.
   int getValue( Semaphore::sem_value_t *sval );
-
 };
 
 //! This is a utility class used for platform independant abstraction.

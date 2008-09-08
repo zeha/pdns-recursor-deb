@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2005 - 2006  PowerDNS.COM BV
+    Copyright (C) 2005 - 2008  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 as 
@@ -70,6 +70,7 @@ public:
   string getZoneRepresentation() const
   {
     struct sockaddr_in6 addr;
+    memset(&addr, 0, sizeof(addr));
     addr.sin6_family=AF_INET6;
     memcpy(&addr.sin6_addr, d_ip6, 16);
 
@@ -172,13 +173,12 @@ string NSECRecordContent::getZoneRepresentation() const
   return ret;
 }
 
-
-
 boilerplate_conv(NS, ns_t_ns, conv.xfrLabel(d_content, true));
 boilerplate_conv(PTR, ns_t_ptr, conv.xfrLabel(d_content, true));
 boilerplate_conv(CNAME, ns_t_cname, conv.xfrLabel(d_content, true));
-boilerplate_conv(TXT, ns_t_txt, conv.xfrText(d_text));
-boilerplate_conv(SPF, 99, conv.xfrText(d_text));
+boilerplate_conv(MR, ns_t_mr, conv.xfrLabel(d_alias, false));
+boilerplate_conv(TXT, ns_t_txt, conv.xfrText(d_text, true));
+boilerplate_conv(SPF, 99, conv.xfrText(d_text, true));
 boilerplate_conv(HINFO, ns_t_hinfo,  conv.xfrText(d_cpu);   conv.xfrText(d_host));
 
 boilerplate_conv(RP, ns_t_rp,
@@ -191,6 +191,21 @@ boilerplate_conv(OPT, ns_t_opt,
 		 conv.xfrText(d_data)
 		 );
 
+
+boilerplate_conv(TSIG, ns_t_tsig, 
+		 conv.xfrLabel(d_algoName);
+		 conv.xfr48BitInt(d_time);
+		 conv.xfr16BitInt(d_fudge);
+		 uint16_t size=d_mac.size();
+		 conv.xfr16BitInt(size);
+		 conv.xfrBlob(d_mac, size);
+		 conv.xfr16BitInt(d_origID);
+		 conv.xfr16BitInt(d_eRcode);
+		 size=d_otherData.size();
+		 conv.xfr16BitInt(size);
+		 conv.xfrBlob(d_otherData, size);
+		 );
+
 MXRecordContent::MXRecordContent(uint16_t preference, const string& mxname) : DNSRecordContent(ns_t_mx), d_preference(preference), d_mxname(mxname)
 {
 }
@@ -200,13 +215,35 @@ boilerplate_conv(MX, ns_t_mx,
 		 conv.xfrLabel(d_mxname, true);
 		 )
 
+boilerplate_conv(KX, ns_t_kx, 
+		 conv.xfr16BitInt(d_preference);
+		 conv.xfrLabel(d_exchanger, false);
+		 )
+
+boilerplate_conv(IPSECKEY, 45,  /* ns_t_ipsec */
+		 conv.xfr8BitInt(d_preference);
+		 conv.xfr8BitInt(d_gatewaytype);
+		 conv.xfr8BitInt(d_algorithm);
+		 conv.xfrLabel(d_gateway, false);
+		 conv.xfrBlob(d_publickey);
+		 )
+
+boilerplate_conv(DHCID, 49, 
+		 conv.xfrBlob(d_content);
+		 )
+
+
+boilerplate_conv(AFSDB, ns_t_afsdb, 
+		 conv.xfr16BitInt(d_subtype);
+		 conv.xfrLabel(d_hostname);
+		 )
+
 
 boilerplate_conv(NAPTR, ns_t_naptr,
 		 conv.xfr16BitInt(d_order);    conv.xfr16BitInt(d_preference);
 		 conv.xfrText(d_flags);        conv.xfrText(d_services);         conv.xfrText(d_regexp);
 		 conv.xfrLabel(d_replacement);
 		 )
-
 
 
 SRVRecordContent::SRVRecordContent(uint16_t preference, uint16_t weight, uint16_t port, const string& target) 
@@ -234,6 +271,13 @@ boilerplate_conv(SOA, ns_t_soa,
 		 conv.xfr32BitInt(d_st.retry);
 		 conv.xfr32BitInt(d_st.expire);
 		 conv.xfr32BitInt(d_st.minimum);
+		 );
+#undef KEY
+boilerplate_conv(KEY, ns_t_key, 
+		 conv.xfr16BitInt(d_flags); 
+		 conv.xfr8BitInt(d_protocol); 
+		 conv.xfr8BitInt(d_algorithm); 
+		 conv.xfrBlob(d_certificate);
 		 );
 
 boilerplate_conv(CERT, 37, 
@@ -293,15 +337,20 @@ void reportBasicTypes()
 
 void reportOtherTypes()
 {
+   AFSDBRecordContent::report();
    SPFRecordContent::report();
    NAPTRRecordContent::report();
+   LOCRecordContent::report();
+   HINFORecordContent::report();
    RPRecordContent::report();
+   KEYRecordContent::report();
    DNSKEYRecordContent::report();
    RRSIGRecordContent::report();
    DSRecordContent::report();
    SSHFPRecordContent::report();
    CERTRecordContent::report();
    NSECRecordContent::report();
+   TSIGRecordContent::report();
    OPTRecordContent::report();
 }
 

@@ -134,6 +134,11 @@ static uint64_t getUserTimeMsec()
 }
 #endif
 
+static uint64_t calculateUptime()
+{
+  return time(0) - g_stats.startupTime;
+}
+
 static string doCurrentQueries()
 {
   ostringstream ostr;
@@ -184,12 +189,21 @@ RecursorControlParser::RecursorControlParser()
 
   addGetStat("qa-latency", &g_stats.avgLatencyUsec);
   addGetStat("unexpected-packets", &g_stats.unexpectedCount);
+  addGetStat("case-mismatches", &g_stats.caseMismatchCount);
   addGetStat("spoof-prevents", &g_stats.spoofCount);
 
   addGetStat("nsset-invalidations", &g_stats.nsSetInvalidations);
 
   addGetStat("resource-limits", &g_stats.resourceLimits);
   addGetStat("dlg-only-drops", &SyncRes::s_nodelegated);
+  
+  addGetStat("shunted-queries", &g_stats.shunted);
+  addGetStat("noshunt-size", &g_stats.noShuntSize);
+  addGetStat("noshunt-expired", &g_stats.noShuntExpired);
+  addGetStat("noshunt-nomatch", &g_stats.noShuntNoMatch);
+  addGetStat("noshunt-cname", &g_stats.noShuntCNAME);
+  addGetStat("noshunt-wrong-question", &g_stats.noShuntWrongQuestion);
+  addGetStat("noshunt-wrong-type", &g_stats.noShuntWrongType);
 
   addGetStat("negcache-entries", boost::bind(&SyncRes::negcache_t::size, ref(SyncRes::s_negcache)));
   addGetStat("throttle-entries", boost::bind(&SyncRes::throttle_t::size, ref(SyncRes::s_throttle)));
@@ -205,6 +219,8 @@ RecursorControlParser::RecursorControlParser()
   addGetStat("unreachables", &SyncRes::s_unreachables);
   addGetStat("chain-resends", &g_stats.chainResends);
 
+  addGetStat("uptime", calculateUptime);
+
 #ifndef WIN32
   //  addGetStat("query-rate", getQueryRate);
   addGetStat("user-msec", getUserTimeMsec);
@@ -215,6 +231,12 @@ RecursorControlParser::RecursorControlParser()
 static void doExit()
 {
   L<<Logger::Error<<"Exiting on user request"<<endl;
+  extern RecursorControlChannel s_rcc;
+  s_rcc.~RecursorControlChannel(); 
+
+  extern string s_pidfname;
+  if(!s_pidfname.empty()) 
+    unlink(s_pidfname.c_str()); // we can at least try..
   _exit(1);
 }
 

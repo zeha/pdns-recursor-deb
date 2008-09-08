@@ -91,10 +91,20 @@ int PortsFDMultiplexer::run(struct timeval* now)
 
   gettimeofday(now,0);
   
-  if(ret < 0 && errno!=EINTR && errno!=ETIME)
-    throw FDMultiplexerException("completion port_getn returned error: "+stringerror());
+  /* port_getn has an unusual API - (ret == -1, errno == ETIME) can
+     mean partial success; you must check (*numevents) in this case
+     and process anything in there, otherwise you'll never see any
+     events from that object again. We don't care about pure timeouts
+     (ret == -1, errno == ETIME, *numevents == 0) so we don't bother
+     with that case. */
+  if(ret < 0 && errno!=ETIME) {
+    if(errno!=EINTR)
+      throw FDMultiplexerException("completion port_getn returned error: "+stringerror());
+    // EINTR is not really an error
+    return 0;
+  }
 
-  if((ret < 0 && errno==ETIME) || numevents==0) // nothing
+  if(!numevents) // nothing
     return 0;
 
   d_inrun=true;
@@ -107,6 +117,7 @@ int PortsFDMultiplexer::run(struct timeval* now)
       if(d_readCallbacks.count(d_pevents[n].portev_object) && port_associate(d_portfd, PORT_SOURCE_FD, d_pevents[n].portev_object, 
 			POLLIN, 0) < 0)
 	throw FDMultiplexerException("Unable to add fd back to ports (read): "+stringerror());
+      continue; // so we don't find ourselves as writable again
     }
 
     d_iter=d_writeCallbacks.find(d_pevents[n].portev_object);

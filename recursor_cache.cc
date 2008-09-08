@@ -4,6 +4,7 @@
 #include <boost/shared_ptr.hpp>
 #include "dnsrecords.hh"
 #include "arguments.hh"
+#include "syncres.hh"
 
 using namespace std;
 using namespace boost;
@@ -33,30 +34,6 @@ namespace __gnu_cxx
 }
 #endif
 
-string simpleCompress(const string& label)
-{
-  typedef vector<pair<unsigned int, unsigned int> > parts_t;
-  parts_t parts;
-  vstringtok(parts, label, ".");
-  string ret;
-  ret.reserve(label.size()+4);
-  for(parts_t::const_iterator i=parts.begin(); i!=parts.end(); ++i) {
-    ret.append(1, (char)(i->second - i->first));
-    ret.append(label.c_str() + i->first, i->second - i->first);
-  }
-  ret.append(1, (char)0);
-  return ret;
-}
-
-void simpleExpandTo(const string& label, unsigned int frompos, string& ret)
-{
-  unsigned int labellen=0;
-  while((labellen=label.at(frompos++))) {
-    ret.append(label.c_str()+frompos, labellen);
-    ret.append(1,'.');
-    frompos+=labellen;
-  }
-}
 
 DNSResourceRecord String2DNSRR(const string& qname, const QType& qt, const string& serial, uint32_t ttd)
 {
@@ -108,14 +85,8 @@ string DNSRR2String(const DNSResourceRecord& rr)
     IpToU32(rr.content, &ip);
     return string((char*)&ip, 4);
   }
-  else if(type==QType::NS) {
-    NSRecordContent ar(rr.content);
-    return ar.serialize(rr.qname);
-  }
-  else if(type==QType::CNAME) {
-    CNAMERecordContent ar(rr.content);
-    return ar.serialize(rr.qname);
-  }
+  else if(type==QType::NS || type==QType::CNAME)
+      return simpleCompress(rr.content, rr.qname);
   else {
     string ret;
     shared_ptr<DNSRecordContent> drc(DNSRecordContent::mastermake(type, 1, rr.content));
@@ -142,6 +113,66 @@ unsigned int MemRecursorCache::bytes()
   return ret;
 }
 
+int MemRecursorCache::getDirect(time_t now, const char* qname, const QType& qt, uint32_t ttd[10], char* data[10], uint16_t len[10])
+{
+  if(!d_cachecachevalid || Utility::strcasecmp(d_cachedqname.c_str(), qname)) {
+//    cerr<<"had cache cache miss for '"<<qname<<"'"<<endl;
+    d_cachedqname=qname;
+    d_cachecache=d_cache.equal_range(tie(qname));
+    d_cachecachevalid=true;
+  }
+  else
+    ;
+  //    cerr<<"had cache cache hit!"<<endl;
+
+  if(d_cachecache.first == d_cachecache.second) {
+    g_stats.noShuntNoMatch++;
+    return false;
+  }
+
+  pair<cache_t::iterator, cache_t::iterator> range = d_cachecache;
+  
+  unsigned int n=0;
+  for(;range.first != range.second; ++range.first) {
+    if(range.first->d_qtype == QType::CNAME) { // if we see a cname, we need the whole shebang (for now)
+      g_stats.noShuntCNAME++;
+      return false;
+    }
+    if(range.first->d_qtype != qt.getCode())
+      continue;
+    if(range.first->getTTD() < (unsigned int) now) {
+      g_stats.noShuntExpired++;
+      return false;
+    }
+    
+    if(range.first->d_records.empty() || range.first->d_records.size() > 9 ) {
+      g_stats.noShuntSize++;
+      return false;
+    }
+    
+    size_t limit=range.first->d_records.size();
+    n=0;
+    for(; n < limit; ++n) {
+      data[n]=(char*)range.first->d_records[n].d_string.c_str();
+      len[n]=range.first->d_records[n].d_string.length();
+      ttd[n]=range.first->d_records[n].d_ttd;
+    }
+    if(n<10) {
+      data[n]=0;
+      typedef cache_t::nth_index<1>::type sequence_t;
+      sequence_t& sidx=d_cache.get<1>();
+      sequence_t::iterator si=d_cache.project<1>(range.first);
+      sidx.relocate(sidx.end(), si); // move it in the LRU list 
+      // can't yet return, need to figure out if there isn't a CNAME that messes things up
+    }
+    else
+      return false;
+  }
+  if(!n)
+    g_stats.noShuntNoMatch++;
+  return n;
+
+}
 
 int MemRecursorCache::get(time_t now, const string &qname, const QType& qt, set<DNSResourceRecord>* res)
 {
@@ -165,7 +196,9 @@ int MemRecursorCache::get(time_t now, const string &qname, const QType& qt, set<
 
   if(d_cachecache.first!=d_cachecache.second) { 
     for(cache_t::const_iterator i=d_cachecache.first; i != d_cachecache.second; ++i) 
-      if(i->d_qtype == qt.getCode() || qt.getCode()==QType::ANY) {
+      if(i->d_qtype == qt.getCode() || qt.getCode()==QType::ANY || 
+	 (qt.getCode()==QType::ADDR && (i->d_qtype == QType::A || i->d_qtype == QType::AAAA) )
+	 ) {
 	typedef cache_t::nth_index<1>::type sequence_t;
 	sequence_t& sidx=d_cache.get<1>();
 	sequence_t::iterator si=d_cache.project<1>(i);
@@ -185,7 +218,7 @@ int MemRecursorCache::get(time_t now, const string &qname, const QType& qt, set<
 	  else
 	    sidx.relocate(sidx.end(), si); 
 	}
-	if(qt.getCode()!=QType::ANY) // normally if we have a hit, we are done
+	if(qt.getCode()!=QType::ANY && qt.getCode()!=QType::ADDR) // normally if we have a hit, we are done
 	  break;
       }
 
@@ -220,7 +253,7 @@ void MemRecursorCache::replace(time_t now, const string &qname, const QType& qt,
   if(qt.getCode()==QType::SOA || qt.getCode()==QType::CNAME)  // you can only have one (1) each of these
     ce.d_records.clear();
 
-  if(auth && !ce.d_auth) {
+  if(auth /* && !ce.d_auth */ ) {
     ce.d_records.clear(); // clear non-auth data
     ce.d_auth = true;
     isNew=true;           // data should be sorted again

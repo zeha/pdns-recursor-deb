@@ -34,15 +34,13 @@
 #include <iostream>
 #include <algorithm>
 #include <boost/optional.hpp>
-
+#include <poll.h>
 #include <iomanip>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include "ahuexception.hh"
 #include <sys/types.h>
-
-
 #include "utility.hh"
 
 string nowTime()
@@ -94,7 +92,7 @@ bool stripDomainSuffix(string *qname, const string &domain)
 }
 
 /** Chops off the start of a domain, so goes from 'www.ds9a.nl' to 'ds9a.nl' to 'nl' to ''. Return zero on the empty string */
-bool chopOff(string &domain)
+bool chopOff(string &domain) 
 {
   if(domain.empty())
     return false;
@@ -103,8 +101,12 @@ bool chopOff(string &domain)
 
   if(fdot==string::npos) 
     domain="";
-  else 
-    domain=domain.substr(fdot+1);
+  else {
+    string::size_type remain = domain.length() - (fdot + 1);
+    char tmp[remain];
+    memcpy(tmp, domain.c_str()+fdot+1, remain);
+    domain.assign(tmp, remain); // don't dare to do this w/o tmp holder :-)
+  }
   return true;
 }
 
@@ -120,8 +122,12 @@ bool chopOffDotted(string &domain)
 
   if(fdot==domain.size()-1) 
     domain=".";
-  else 
-    domain=domain.substr(fdot+1);
+  else  {
+    string::size_type remain = domain.length() - (fdot + 1);
+    char tmp[remain];
+    memcpy(tmp, domain.c_str()+fdot+1, remain);
+    domain.assign(tmp, remain);
+  }
   return true;
 }
 
@@ -180,7 +186,6 @@ bool dottedEndsOn(const string &domain, const string &suffix)
   return true;
 }
 
-
 int sendData(const char *buffer, int replen, int outsock)
 {
   uint16_t nlen=htons(replen);
@@ -191,10 +196,32 @@ int sendData(const char *buffer, int replen, int outsock)
   iov[1].iov_len=replen;
   int ret=Utility::writev(outsock,iov,2);
 
-  if(ret<0) {
+  if(ret <= 0)  // "EOF is error" - we can't deal with EAGAIN errors at this stage yet
     return -1;
-  }
+
   if(ret!=replen+2) {
+    // we can safely assume ret > 2, as 2 is < PIPE_BUF
+    
+    buffer += (ret - 2);
+    replen -= (ret - 2);
+
+    while (replen) {
+      ret = write(outsock, buffer, replen);
+      if(ret < 0) {
+	if(errno==EAGAIN) { // wait, we might've exhausted the window
+	  while(waitForRWData(outsock, false, 1, 0)==0)
+	    ;
+	  continue;
+	}
+	return ret;
+      }
+      if(!ret)
+	return -1; // "EOF == error"
+      replen -= ret;
+      buffer += ret;
+    }
+    if(!replen)
+      return 0;
     return -1;
   }
   return 0;
@@ -242,19 +269,26 @@ void parseService(const string &descr, ServiceTuple &st)
   }
 }
 
+// returns -1 in case if error, 0 if no data is available, 1 if there is. In the first two cases, errno is set
 int waitForData(int fd, int seconds, int useconds)
 {
-  struct timeval tv;
+  return waitForRWData(fd, true, seconds, useconds);
+}
+
+int waitForRWData(int fd, bool waitForRead, int seconds, int useconds)
+{
   int ret;
 
-  tv.tv_sec   = seconds;
-  tv.tv_usec  = useconds;
+  struct pollfd pfd;
+  memset(&pfd, 0, sizeof(pfd));
+  pfd.fd = fd;
+  
+  if(waitForRead)
+    pfd.events=POLLIN;
+  else
+    pfd.events=POLLOUT;
 
-  fd_set readfds;
-  FD_ZERO( &readfds );
-  FD_SET( fd, &readfds );
-
-  ret = select( fd + 1, &readfds, NULL, NULL, &tv );
+  ret = poll(&pfd, 1, seconds * 1000 + useconds/1000);
   if ( ret == -1 )
     errno = ETIMEDOUT;
 
@@ -548,4 +582,15 @@ boost::optional<int> logFacilityToLOG(unsigned int facility)
   default:
     return ret;
   }
+}
+
+string stripDot(const string& dom)
+{
+  if(dom.empty())
+    return dom;
+
+  if(dom[dom.size()-1]!='.')
+    return dom;
+
+  return dom.substr(0,dom.size()-1);
 }

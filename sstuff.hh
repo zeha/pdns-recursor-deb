@@ -24,9 +24,9 @@ using namespace boost;
 class NetworkError : public runtime_error
 {
 public:
-  NetworkError(string why="Network Error") : runtime_error(why.c_str())
+  NetworkError(const string& why="Network Error") : runtime_error(why.c_str())
   {}
-  NetworkError(char *why="Network Error") : runtime_error(why)
+  NetworkError(const char *why="Network Error") : runtime_error(why)
   {}
 };
 
@@ -189,12 +189,14 @@ public:
     struct sockaddr_in remote;
     socklen_t remlen=sizeof(remote);
     int bytes;
-    if((bytes=recvfrom(d_socket, d_buffer, d_buflen, 0, (sockaddr *)&remote, &remlen))<0)
-      if(errno!=EAGAIN)
+    if((bytes=recvfrom(d_socket, d_buffer, d_buflen, 0, (sockaddr *)&remote, &remlen))<0) {
+      if(errno!=EAGAIN) {
 	throw NetworkError(strerror(errno));
-      else
+      }
+      else {
 	return false;
-    
+      }
+    }
     dgram.assign(d_buffer,bytes);
     ep.address.byte=remote.sin_addr.s_addr;
     ep.port=ntohs(remote.sin_port);

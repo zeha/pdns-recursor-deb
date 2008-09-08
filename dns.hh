@@ -16,7 +16,7 @@
     along with this program; if not, write to the Free Software
     Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
-// $Id: dns.hh 830 2006-05-12 12:16:55Z ahu $ 
+// $Id: dns.hh 1094 2007-10-28 17:36:16Z ahu $ 
 /* (C) 2002 POWERDNS.COM BV */
 #ifndef DNS_HH
 #define DNS_HH
@@ -46,7 +46,7 @@ struct SOAData
 class RCode
 {
 public:
-  enum { NoError=0, FormErr=1, ServFail=2, NXDomain=3, NotImp=4, Refused=5 };
+  enum rcodes_ { NoError=0, FormErr=1, ServFail=2, NXDomain=3, NotImp=4, Refused=5 };
 };
 
 class Opcode
@@ -115,7 +115,7 @@ struct EDNS0Record
 #pragma pack (pop)
 #endif 
 
-typedef enum  {
+enum  {
         ns_t_invalid = 0,       /* Cookie. */
         ns_t_a = 1,             /* Host address. */
         ns_t_ns = 2,            /* Authoritative server. */
@@ -137,7 +137,7 @@ typedef enum  {
         ns_t_afsdb = 18,        /* AFS cell database. */
         ns_t_x25 = 19,          /* X_25 calling address. */
         ns_t_isdn = 20,         /* ISDN calling address. */
-	ns_t_rt = 21,           /* Router. */
+        ns_t_rt = 21,           /* Router. */
         ns_t_nsap = 22,         /* NSAP address. */
         ns_t_nsap_ptr = 23,     /* Reverse NSAP lookup (deprecated). */
         ns_t_sig = 24,          /* Security signature. */

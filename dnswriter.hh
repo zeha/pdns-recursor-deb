@@ -40,11 +40,13 @@ using namespace std;
 
 class DNSPacketWriter
 {
+
 public:
+  typedef vector<pair<string, uint16_t> > lmap_t;
   enum Place {ANSWER=1, AUTHORITY=2, ADDITIONAL=3}; 
 
   //! Start a DNS Packet in the vector passed, with question qname, qtype and qclass
-  DNSPacketWriter(vector<uint8_t>& content, const string& qname, uint16_t  qtype, uint16_t qclass=1);
+  DNSPacketWriter(vector<uint8_t>& content, const string& qname, uint16_t  qtype, uint16_t qclass=1, uint8_t opcode=0);
   
   /** Start a new DNS record within this packet for namq, qtype, ttl, class and in the requested place. Note that packets can only be written in natural order - 
       ANSWER, AUTHORITY, ADDITIONAL */
@@ -63,6 +65,7 @@ public:
   /** Should the packet have grown too big for the writer's liking, rollback removes the record currently being written */
   void rollback();
 
+  void xfr48BitInt(uint64_t val);
   void xfr32BitInt(uint32_t val);
   void xfr16BitInt(uint16_t val);
   void xfrType(uint16_t val)
@@ -81,8 +84,8 @@ public:
   void xfr8BitInt(uint8_t val);
 
   void xfrLabel(const string& label, bool compress=false);
-  void xfrText(const string& text);
-  void xfrBlob(const string& blob);
+  void xfrText(const string& text, bool multi=false);
+  void xfrBlob(const string& blob, int len=-1);
   void xfrHexBlob(const string& blob);
 
   uint16_t d_pos;
@@ -98,7 +101,7 @@ private:
   string d_recordqname;
   uint16_t d_recordqtype, d_recordqclass;
   uint32_t d_recordttl;
-  map<string, uint16_t> d_labelmap;
+  lmap_t d_labelmap;
   uint16_t d_stuff;
   uint16_t d_sor;
   uint16_t d_rollbackmarker; // start of last complete packet, for rollback

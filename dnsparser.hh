@@ -70,6 +70,8 @@ public:
   uint32_t get32BitInt();
   uint16_t get16BitInt();
   uint8_t get8BitInt();
+  
+  void xfr48BitInt(uint64_t& val);
 
   void xfr32BitInt(uint32_t& val)
   {
@@ -109,12 +111,13 @@ public:
     label=getLabel();
   }
 
-  void xfrText(string &text)
+  void xfrText(string &text, bool multi=false)
   {
-    text=getText();
+    text=getText(multi);
   }
 
   void xfrBlob(string& blob);
+  void xfrBlob(string& blob, int length);
   void xfrHexBlob(string& blob);
 
   static uint16_t get16BitInt(const vector<unsigned char>&content, uint16_t& pos);
@@ -125,7 +128,7 @@ public:
   void copyRecord(unsigned char* dest, uint16_t len);
 
   string getLabel(unsigned int recurs=0);
-  string getText();
+  string getText(bool multi);
 
   uint16_t d_pos;
 
@@ -149,7 +152,8 @@ public:
   virtual string serialize(const string& qname)
   {
     vector<uint8_t> packet;
-    DNSPacketWriter pw(packet, "", 1);
+    string empty;
+    DNSPacketWriter pw(packet, empty, 1);
     
     pw.startRecord(qname, d_qtype);
     this->toPacket(pw);
@@ -310,6 +314,7 @@ private:
   vector<uint8_t> d_content;
 };
 
-
+string simpleCompress(const string& label, const string& root="");
+void simpleExpandTo(const string& label, unsigned int frompos, string& ret);
 
 #endif

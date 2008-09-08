@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2005 - 2006  PowerDNS.COM BV
+    Copyright (C) 2005 - 2007  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 
@@ -29,16 +29,28 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
 
-ZoneParserTNG::ZoneParserTNG(const string& fname, const string& zname) : d_zonename(zname), d_defaultttl(3600)
+ZoneParserTNG::ZoneParserTNG(const string& fname, const string& zname, const string& reldir) : d_reldir(reldir), d_zonename(zname), d_defaultttl(3600)
 {
-  d_fp=fopen(fname.c_str(), "r");
-  if(!d_fp)
+  d_zonename = toCanonic("", d_zonename);
+  stackFile(fname);
+}
+
+void ZoneParserTNG::stackFile(const std::string& fname)
+{
+  FILE *fp=fopen(fname.c_str(), "r");
+  if(!fp)
     throw runtime_error("Unable to open file '"+fname+"': "+stringerror());
+
+  filestate fs(fp, fname);
+  d_filestates.push(fs);
 }
 
 ZoneParserTNG::~ZoneParserTNG()
 {
-  fclose(d_fp);
+  while(!d_filestates.empty()) {
+    fclose(d_filestates.top().d_fp);
+    d_filestates.pop();
+  }
 }
 
 static string makeString(const string& line, const pair<string::size_type, string::size_type>& range)
@@ -46,7 +58,23 @@ static string makeString(const string& line, const pair<string::size_type, strin
   return string(line.c_str() + range.first, range.second - range.first);
 }
 
-static unsigned int makeTTLFromZone(const string& str)
+static bool isTimeSpec(const string& nextpart)
+{
+  if(nextpart.empty())
+    return false;
+  for(string::const_iterator iter = nextpart.begin(); iter != nextpart.end(); ++iter) {
+    if(isdigit(*iter))
+      continue;
+    if(iter+1 != nextpart.end())
+      return false;
+    char c=tolower(*iter);
+    return (c=='m' || c=='h' || c=='d' || c=='w' || c=='y');
+  }
+  return true;
+}
+
+
+unsigned int ZoneParserTNG::makeTTLFromZone(const string& str)
 {
   if(str.empty())
     return 0;
@@ -55,6 +83,9 @@ static unsigned int makeTTLFromZone(const string& str)
   char lc=toupper(str[str.length()-1]);
   if(!isdigit(lc))
     switch(lc) {
+    case 'M':
+      val*=60; // minutes, not months!
+      break;
     case 'H':
       val*=3600;
       break;
@@ -64,39 +95,176 @@ static unsigned int makeTTLFromZone(const string& str)
     case 'W':
       val*=3600*24*7;
       break;
-    case 'M':
-      val*=3600*24*7*4;
-      break;
     case 'Y': // ? :-)
       val*=3600*24*365;
       break;
+
     default:
-      throw ZoneParserTNG::exception("Unable to parse time specification '"+str+"'");
+      throw ZoneParserTNG::exception("Unable to parse time specification '"+str+"' on line "+
+				     lexical_cast<string>(d_filestates.top().d_lineno)+" of file '"+
+				     d_filestates.top().d_filename+"'");
     }
   return val;
 }
 
+bool ZoneParserTNG::getTemplateLine()
+{
+  if(d_templateparts.empty() || d_templatecounter > d_templatestop) // no template, or done with
+    return false;
+
+  string retline;
+  for(parts_t::const_iterator iter = d_templateparts.begin() ; iter != d_templateparts.end(); ++iter) {
+    if(iter != d_templateparts.begin())
+      retline+=" ";
+
+    string part=makeString(d_templateline, *iter);
+    
+    /* a part can contain a 'naked' $, an escaped $ (\$), or ${offset,width,radix}, with width defaulting to 0, 
+       and radix beging 'd', 'o', 'x' or 'X', defaulting to 'd'. 
+
+       The width is zero-padded, so if the counter is at 1, the offset is 15, with is 3, and the radix is 'x',
+       output will be '010', from the input of ${15,3,x}
+    */
+
+    string outpart;
+    outpart.reserve(part.size()+5);
+    bool inescape=false;
+
+    for(string::size_type pos = 0; pos < part.size() ; ++pos) {
+      char c=part[pos];
+      if(inescape) {
+	outpart.append(1, c);
+	inescape=false;
+	continue;
+      }
+	
+      if(part[pos]=='\\') {
+	inescape=true;
+	continue;
+      }
+      if(c=='$') {
+	if(pos + 1 == part.size() || part[pos+1]!='{') {  // a trailing $, or not followed by {
+	  outpart.append(lexical_cast<string>(d_templatecounter));
+	  continue;
+	}
+	
+	// need to deal with { case 
+	
+	pos+=2;
+	string::size_type startPos=pos;
+	for(; pos < part.size() && part[pos]!='}' ; ++pos)
+	  ;
+	
+	if(pos == part.size()) // partial spec
+	  break;
+
+	// we are on the '}'
+
+	string spec(part.c_str() + startPos, part.c_str() + pos);
+	int offset=0, width=0;
+	char radix='d';
+	sscanf(spec.c_str(), "%d,%d,%c", &offset, &width, &radix);  // parse format specifier
+
+	char format[12];
+	snprintf(format, sizeof(format) - 1, "%%0%d%c", width, radix); // make into printf-style format
+
+	char tmp[80];
+	snprintf(tmp, sizeof(tmp)-1, format, d_templatecounter + offset); // and do the actual printing
+	outpart+=tmp;
+      }
+      else
+	outpart.append(1, c);
+    }
+    retline+=outpart;
+  }
+  d_templatecounter+=d_templatestep;
+
+  d_line = retline;
+  return true;
+}
+
+void chopComment(string& line)
+{
+  string::size_type pos, len = line.length();
+  bool inQuote=false;
+  for(pos = 0 ; pos < len; ++pos) {
+    if(line[pos]=='\\') 
+      pos++;
+    else if(line[pos]=='"') 
+      inQuote=!inQuote;
+    else if(line[pos]==';' && !inQuote)
+      break;
+  }
+  if(pos != len)
+    line.resize(pos);
+}
+
+bool findAndElide(string& line, char c)
+{
+  string::size_type pos, len = line.length();
+  bool inQuote=false;
+  for(pos = 0 ; pos < len; ++pos) {
+    if(line[pos]=='\\') 
+      pos++;
+    else if(line[pos]=='"') 
+      inQuote=!inQuote;
+    else if(line[pos]==c && !inQuote)
+      break;
+  }
+  if(pos != len) {
+    line.erase(pos, 1);
+    return true;
+  }
+  return false;
+}
+
+
+
 bool ZoneParserTNG::get(DNSResourceRecord& rr) 
 {
  retry:;
-  if(!getLine())
+  if(!getTemplateLine() && !getLine())
     return false;
 
   chomp(d_line, " \r\n\x1a");
-  deque<pair<string::size_type, string::size_type> > parts;
+
+  parts_t parts;
   vstringtok(parts, d_line);
 
   if(parts.empty())
     goto retry;
 
   if(d_line[0]=='$') { 
-    if(makeString(d_line, parts[0])=="$TTL" && parts.size() > 1)
-      d_defaultttl=makeTTLFromZone(makeString(d_line,parts[1]));
+    string command=makeString(d_line, parts[0]);
+    if(iequals(command,"$TTL") && parts.size() > 1)
+      d_defaultttl=makeTTLFromZone(trim_right_copy_if(makeString(d_line, parts[1]), is_any_of(";")));
+    else if(iequals(command,"$INCLUDE") && parts.size() > 1) {
+      string fname=unquotify(makeString(d_line, parts[1]));
+      if(!fname.empty() && fname[0]!='/' && !d_reldir.empty())
+	fname=d_reldir+"/"+fname;
+      stackFile(fname);
+    }
+    else if(iequals(command, "$ORIGIN") && parts.size() > 1) {
+      d_zonename = toCanonic("", makeString(d_line, parts[1]));
+    }
+    else if(iequals(command, "$GENERATE") && parts.size() > 2) {
+      // $GENERATE 1-127 $ CNAME $.0
+      string range=makeString(d_line, parts[1]);
+      d_templatestep=1;
+      d_templatestop=0;
+      sscanf(range.c_str(),"%d-%d/%d", &d_templatecounter, &d_templatestop, &d_templatestep);
+      d_templateline=d_line;
+      parts.pop_front();
+      parts.pop_front();
+
+      d_templateparts=parts;
+      goto retry;
+    }
     else
-      throw exception("Can't parse zone line '"+d_line+"'");
+      throw exception("Can't parse zone line '"+d_line+"' on line "+lexical_cast<string>(d_filestates.top().d_lineno)+
+		      " of file '"+d_filestates.top().d_filename);
     goto retry;
   }
-
 
   if(isspace(d_line[0])) 
     rr.qname=d_prevqname;
@@ -116,8 +284,6 @@ bool ZoneParserTNG::get(DNSResourceRecord& rr)
 
   if(parts.empty()) 
     throw exception("Line with too little parts");
-
-  // cout<<"Have qname: '"<<rr.qname<<"'\n";
 
   string nextpart;
   
@@ -141,7 +307,7 @@ bool ZoneParserTNG::get(DNSResourceRecord& rr)
       // cout<<"Ignoring 'IN'\n";
       continue;
     }
-    if(!haveTTL && !haveQTYPE && all(nextpart, is_digit())) {
+    if(!haveTTL && !haveQTYPE && isTimeSpec(nextpart)) {
       rr.ttl=makeTTLFromZone(nextpart);
       haveTTL=true;
       // cout<<"ttl is probably: "<<rr.ttl<<endl;
@@ -157,8 +323,10 @@ bool ZoneParserTNG::get(DNSResourceRecord& rr)
       continue;
     }
     catch(...) {
-      cerr<<"Oops, this doesn't look like a qtype, stopping loop\n";
-      break;
+      throw runtime_error("Parsing zone content on line "+
+			  lexical_cast<string>(d_filestates.top().d_lineno)+
+			  " of file '"+d_filestates.top().d_filename+"': '"+nextpart+
+			  "' doesn't look like a qtype, stopping loop");
     }
   }
   if(!haveQTYPE) 
@@ -166,31 +334,27 @@ bool ZoneParserTNG::get(DNSResourceRecord& rr)
 
   rr.content=d_line.substr(range.first);
 
-  string::size_type pos=rr.content.rfind(';');
-  if(pos!=string::npos)
-    rr.content.resize(pos);
+  chopComment(rr.content);
+  trim(rr.content);
 
-  if(rr.qtype.getCode()!=QType::TXT && (pos=rr.content.find('('))!=string::npos) {
-    rr.content.resize(pos); // chop off (
-    trim(rr.content);
-    while(getLine()) {
-      chomp(d_line,"\r\n ");
-      pos=d_line.rfind(';');
-      if(pos!=string::npos)
-	d_line.resize(pos);
+  if(equals(rr.content, "@"))
+    rr.content=d_zonename;
 
-      trim(d_line);
-      
-      pos=d_line.find(')');
-      if(pos!=string::npos) {
-	d_line.resize(pos);
+  if(findAndElide(rr.content, '(')) {      // have found a ( and elided it
+    if(!findAndElide(rr.content, ')')) {
+      while(getLine()) {
+	chomp(d_line,"\r\n ");
+	chopComment(d_line);
 	trim(d_line);
+	
+	bool ended = findAndElide(d_line, ')');
 	rr.content+=" "+d_line;
-	break;
+	if(ended)
+	  break;
       }
-      rr.content+=" "+d_line;
     }
   }
+
   vector<string> soaparts;
   switch(rr.qtype.getCode()) {
   case QType::MX:
@@ -198,6 +362,7 @@ bool ZoneParserTNG::get(DNSResourceRecord& rr)
   case QType::CNAME:
   case QType::PTR:
   case QType::SRV:
+  case QType::AFSDB:
     rr.content=toCanonic(d_zonename, rr.content);
     break;
 
@@ -211,8 +376,16 @@ bool ZoneParserTNG::get(DNSResourceRecord& rr)
     for(string::size_type n = 0; n < soaparts.size(); ++n) {
       if(n)
 	rr.content.append(1,' ');
-      rr.content+=soaparts[n];
+
+      if(n > 1)
+	rr.content+=lexical_cast<string>(makeTTLFromZone(soaparts[n]));
+      else
+	rr.content+=soaparts[n];
+
+      if(n==6)
+	d_defaultttl=makeTTLFromZone(soaparts[n]);
     }
+    break;
   default:;
   }
 
@@ -222,27 +395,15 @@ bool ZoneParserTNG::get(DNSResourceRecord& rr)
 
 bool ZoneParserTNG::getLine()
 {
-  char buffer[1024];
-  if(fgets(buffer, 1024, d_fp)) {
-    d_line=buffer;
-    return true;
+  while(!d_filestates.empty()) {
+    char buffer[1024];
+    if(fgets(buffer, 1024, d_filestates.top().d_fp)) {
+      d_filestates.top().d_lineno++;
+      d_line=buffer;
+      return true;
+    }
+    fclose(d_filestates.top().d_fp);
+    d_filestates.pop();
   }
   return false;
 }
-
-
-#if 0
-int main(int argc, char** argv)
-try
-{
-  reportAllTypes();
-  ZoneParserTNG zpt(argv[1]);
-  DNSResourceRecord rr;
-  while(zpt.get(rr)) {
-  }
-  
-
-}
-catch(...)
-{}
-#endif
