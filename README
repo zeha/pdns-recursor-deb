@@ -1,0 +1,76 @@
+DOCUMENTATION
+-------------
+For full details, please read:
+
+               http://doc.powerdns.com/built-in-recursor.html
+
+COMPILING
+---------
+
+$ ./configure
+$ make or gmake
+
+The only dependency is Boost, http://boost.org/
+You only need to download it, there is no need to compile.
+
+On most modern UNIX distributions, you can simply install 'boost' or
+'boost-dev' or 'boost-devel'. If you don't have that option, or don't want
+to use it, try:
+
+1) head to http://sourceforge.net/project/showfiles.php?group_id=7586 and
+download the latest boost tar.bz2 or tar.gz, perhaps from:
+http://surfnet.dl.sourceforge.net/sourceforge/boost/boost_1_33_1.tar.bz2
+(use the first link if this one doesn't work)
+
+2) untar it:
+
+$ tar xjf boost_1_33_1.tar.bz2
+
+3) Compile the PowerDNS recursor using:
+
+$ CXXFLAGS=-I./boost_1_33_1/ ./configure
+$ CXXFLAGS=-I./boost_1_33_1/ make clean 
+$ CXXFLAGS=-I./boost_1_33_1/ make all
+(the 'clean' is needed to have make pick up the new boost)
+
+4) Run ./pdns_recursor and you should be set!
+
+5) (g)make install
+
+PLATFORM SPECIFIC NOTES
+-----------------------
+When compiling on Solaris, use:
+$ CPPFLAGS=-DSOLARIS8 ... gmake 
+
+where ... stands for any possible CXXFLAGS or PROFILEFLAGS, see below.
+
+PERFORMANCE
+-----------
+
+For the utmost in performance, compile like this:
+
+   $ PROFILEFLAGS=-fprofile-generate make
+
+Then run the program for a bit, in as much of a real-life setting as you
+have available. Then run:
+
+   $ rec_control quit
+   bye 
+
+Then do:
+
+   $ PROFILEFLAGS=-fprofile-use make clean all
+
+The resulting binary is up to 20% faster in our tests.
+
+Do run with g++ 4.1 if you can, it is the best.
+
+RUNNING ON A DIFFERENT MACHINE
+------------------------------
+To prevent hassles with g++ 4.1 dependencies, you can build like this:
+   $ STATIC=semi make all
+
+PROBLEMS
+--------
+If you have problems linking, try removing the GCC_SKIP_LOCKING line from
+config.h
