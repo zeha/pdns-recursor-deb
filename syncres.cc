@@ -581,7 +581,12 @@ struct TCacheComp
   }
 };
 
-
+static bool magicAddrMatch(const QType& query, const QType& answer)
+{
+  if(query.getCode() != QType::ADDR)
+    return false;
+  return answer.getCode() == QType::A || answer.getCode() == QType::AAAA;
+}
 
 /** returns -1 in case of no results, rcode otherwise */
 int SyncRes::doResolveAt(set<string, CIStringCompare> nameservers, string auth, bool flawedNSSet, const string &qname, const QType &qtype, 
@@ -619,6 +624,7 @@ int SyncRes::doResolveAt(set<string, CIStringCompare> nameservers, string auth, 
       remoteIPs_t::const_iterator remoteIP;
       bool doTCP=false;
       int resolveret;
+      bool pierceDontQuery=false;
 
       LWResult lwr;
       if(tns->empty()) {
@@ -629,16 +635,20 @@ int SyncRes::doResolveAt(set<string, CIStringCompare> nameservers, string auth, 
       }
       else {
 	LOG<<prefix<<qname<<": Trying to resolve NS '"<<*tns<<"' ("<<1+tns-rnameservers.begin()<<"/"<<(unsigned int)rnameservers.size()<<")"<<endl;
+
 	if(!isCanonical(*tns)) {
 	  LOG<<prefix<<qname<<": Domain has hardcoded nameserver(s)"<<endl;
 
 	  pair<string,string> ipport=splitField(*tns, ':');
 	  ComboAddress addr(ipport.first, ipport.second.empty() ? 53 : lexical_cast<uint16_t>(ipport.second));
-
+	  
 	  remoteIPs.push_back(addr);
+	  pierceDontQuery=true;
 	}
-	else
+	else {
 	  remoteIPs=getAs(*tns, depth+1, beenthere);
+	  pierceDontQuery=false;
+	}
 
 	if(remoteIPs.empty()) {
 	  LOG<<prefix<<qname<<": Failed to get IP for NS "<<*tns<<", trying next if available"<<endl;
@@ -665,7 +675,7 @@ int SyncRes::doResolveAt(set<string, CIStringCompare> nameservers, string auth, 
 	    s_throttledqueries++; d_throttledqueries++;
 	    continue;
 	  } 
-	  else if(g_dontQuery && g_dontQuery->match(&*remoteIP)) {
+	  else if(!pierceDontQuery && g_dontQuery && g_dontQuery->match(&*remoteIP)) {
 	    LOG<<prefix<<qname<<": not sending query to " << remoteIP->toString() << ", blocked by 'dont-query' setting" << endl;
 	    continue;
 	  }
@@ -673,6 +683,7 @@ int SyncRes::doResolveAt(set<string, CIStringCompare> nameservers, string auth, 
 	    s_outqueries++; d_outqueries++;
 	  TryTCP:
 	    if(doTCP) {
+	      LOG<<prefix<<qname<<": using TCP with "<< remoteIP->toStringWithPort() <<endl;
 	      s_tcpoutqueries++; d_tcpoutqueries++;
 	    }
 	    
@@ -819,14 +830,12 @@ int SyncRes::doResolveAt(set<string, CIStringCompare> nameservers, string auth, 
 	}
 	// for ANY answers we *must* have an authoritive answer
 	else if(i->d_place==DNSResourceRecord::ANSWER && !Utility::strcasecmp(i->qname.c_str(),qname.c_str()) && 
-		(i->qtype==qtype || 
-		 (
-		  lwr.d_aabit && 
-		     ( qtype == QType(QType::ADDR) && (i->qtype.getCode()==QType::A || i->qtype.getCode()==QType::AAAA) ) || qtype==QType(QType::ANY) 
-		  )   
-		 ) 
-		)   {
-	
+		(
+		 i->qtype==qtype || (lwr.d_aabit && (qtype==QType(QType::ANY) || magicAddrMatch(qtype, i->qtype) ) )
+		) 
+	       )   
+	  {
+	  
 	  LOG<<prefix<<qname<<": answer is in: resolved to '"<< i->content<<"|"<<i->qtype.getName()<<"'"<<endl;
 
 	  done=true;

@@ -57,6 +57,7 @@
 #include "iputils.hh"
 #include "mplexer.hh"
 #include "config.h"
+#include "lua-pdns-recursor.hh"
 
 #ifndef RECURSOR
 #include "statbag.hh"
@@ -66,6 +67,7 @@ StatBag S;
 FDMultiplexer* g_fdm;
 unsigned int g_maxTCPPerClient;
 bool g_logCommonErrors;
+shared_ptr<PowerDNSLua> g_pdl;
 using namespace boost;
 
 #ifdef __FreeBSD__           // see cvstrac ticket #26
@@ -271,7 +273,7 @@ public:
     
     int tries=10;
     while(--tries) {
-      uint16_t port=1025+Utility::random()%64510;
+      uint16_t port=1025+dns_random(64510);
       if(tries==1)  // fall back to kernel 'random'
 	port=0;
       
@@ -315,9 +317,9 @@ int asendto(const char *data, int len, int flags,
 
   for(; chain.first != chain.second; chain.first++) {
     if(chain.first->key.fd > -1) { // don't chain onto existing chained waiter!
-      //      cerr<<"Orig: "<<pident.domain<<", "<<pident.remote.toString()<<", id="<<id<<endl;
-      // cerr<<"Had hit: "<< chain.first->key.domain<<", "<<chain.first->key.remote.toString()<<", id="<<chain.first->key.id
-      // <<", count="<<chain.first->key.chain.size()<<", origfd: "<<chain.first->key.fd<<endl;
+      cerr<<"Orig: "<<pident.domain<<", "<<pident.remote.toString()<<", id="<<id<<endl;
+      cerr<<"Had hit: "<< chain.first->key.domain<<", "<<chain.first->key.remote.toString()<<", id="<<chain.first->key.id
+	  <<", count="<<chain.first->key.chain.size()<<", origfd: "<<chain.first->key.fd<<endl;
       
       chain.first->key.chain.insert(id); // we can chain
       *fd=-1;                            // gets used in waitEvent / sendEvent later on
@@ -534,7 +536,16 @@ void startDoResolve(void *p)
     if(!dc->d_mdp.d_header.rd)
       sr.setCacheOnly();
 
-    int res=sr.beginResolve(dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), dc->d_mdp.d_qclass, ret);
+    int res;
+
+    if(!g_pdl.get() || !g_pdl->preresolve(dc->d_remote, dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res)) {
+       res = sr.beginResolve(dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), dc->d_mdp.d_qclass, ret);
+
+       if(g_pdl.get()) {
+	 if(res == RCode::NXDomain)
+	   g_pdl->nxdomain(dc->d_remote, dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res);
+       }
+    }
 
     if(res<0) {
       pw.getHeader()->rcode=RCode::ServFail;
@@ -1234,15 +1245,18 @@ void handleTCPClientWritable(int fd, FDMultiplexer::funcparam_t& var)
 // resend event to everybody chained onto it
 void doResends(MT_t::waiters_t::iterator& iter, PacketID resend, const string& content)
 {
+
   if(iter->key.chain.empty())
     return;
 
+  cerr<<"doResends called!\n";
   for(PacketID::chain_t::iterator i=iter->key.chain.begin(); i != iter->key.chain.end() ; ++i) {
     resend.fd=-1;
     resend.id=*i;
+    cerr<<"\tResending "<<content.size()<<" bytes for fd="<<resend.fd<<" and id="<<resend.id<<endl;
+
     MT->sendEvent(resend, &content);
     g_stats.chainResends++;
-    //    cerr<<"\tResending "<<content.size()<<" bytes for fd="<<resend.fd<<" and id="<<resend.id<<": "<< res <<endl;
   }
 }
 
@@ -1610,6 +1624,37 @@ void parseAuthAndForwards()
   }
 }
 
+string doReloadLuaScript(vector<string>::const_iterator begin, vector<string>::const_iterator end)
+{
+  string fname=::arg()["lua-dns-script"];
+  try {
+    if(begin==end) {
+      if(!fname.empty()) 
+	g_pdl = shared_ptr<PowerDNSLua>(new PowerDNSLua(fname));
+      else
+	throw runtime_error("Asked to relead lua scripts, but no name passed and no default ('lua-dns-script') defined");
+    }
+    else {
+      fname=*begin;
+      if(fname.empty()) {
+	g_pdl.reset();
+	L<<Logger::Error<<"Unloaded current lua script"<<endl;
+	return "unloaded current lua script\n";
+      }
+      else {
+	g_pdl = shared_ptr<PowerDNSLua>(new PowerDNSLua(fname));
+	::arg().set("lua-dns-script")=fname;
+      }
+    }
+  }
+  catch(exception& e) {
+    L<<Logger::Error<<"Retaining current script, error from '"<<fname<<"': "<< e.what() <<endl;
+    return string("Retaining current script, error from '"+fname+"': "+string(e.what())+"\n");
+  }
+  L<<Logger::Warning<<"(Re)loaded lua script from '"<<fname<<"'"<<endl;
+  return "ok - loaded script from '"+fname+"'\n";
+}
+
 void seedRandom(const string& source);
 
 int serviceMain(int argc, char*argv[])
@@ -1718,6 +1763,19 @@ int serviceMain(int argc, char*argv[])
   }
   
   parseAuthAndForwards();
+
+  try {
+    if(!::arg()["lua-dns-script"].empty()) {
+      g_pdl = shared_ptr<PowerDNSLua>(new PowerDNSLua(::arg()["lua-dns-script"]));
+      L<<Logger::Warning<<"Loaded 'lua' script from '"<<::arg()["lua-dns-script"]<<"'"<<endl;
+    }
+    
+  }
+  catch(exception &e) {
+    L<<Logger::Error<<"Failed to load 'lua' script from '"<<::arg()["lua-dns-script"]<<"': "<<e.what()<<endl;
+    exit(99);
+  }
+
   
   g_stats.remotes.resize(::arg().asNum("remotes-ringbuffer-entries"));
   if(!g_stats.remotes.empty())
@@ -1815,6 +1873,7 @@ int serviceMain(int argc, char*argv[])
 
     Utility::gettimeofday(&g_now, 0);
     g_fdm->run(&g_now);
+    Utility::gettimeofday(&g_now, 0);
 
     if(listenOnTCP) {
       if(TCPConnection::s_currentConnections > maxTcpClients) {  // shutdown
@@ -1886,6 +1945,7 @@ int main(int argc, char **argv)
   //  HTimer mtimer("main");
   //  mtimer.start();
 
+
   g_stats.startupTime=time(0);
   reportBasicTypes();
 
@@ -1937,7 +1997,7 @@ int main(int argc, char **argv)
     ::arg().set("max-negative-ttl", "maximum number of seconds to keep a negative cached entry in memory")="3600";
     ::arg().set("server-id", "Returned when queried for 'server.id' TXT, defaults to hostname")="";
     ::arg().set("remotes-ringbuffer-entries", "maximum number of packets to store statistics for")="0";
-    ::arg().set("version-string", "string reported on version.pdns or version.bind")="PowerDNS Recursor "VERSION" $Id: pdns_recursor.cc 1170 2008-03-22 20:43:44Z ahu $";
+    ::arg().set("version-string", "string reported on version.pdns or version.bind")="PowerDNS Recursor "VERSION" $Id: pdns_recursor.cc 1200 2008-06-14 21:11:33Z ahu $";
     ::arg().set("allow-from", "If set, only allow these comma separated netmasks to recurse")="127.0.0.0/8, 10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12, ::1/128, fe80::/10";
     ::arg().set("allow-from-file", "If set, load allowed netmasks from this file")="";
     ::arg().set("entropy-source", "If set, read entropy from this file")="/dev/urandom";
@@ -1952,6 +2012,7 @@ int main(int argc, char **argv)
     ::arg().set("export-etc-hosts", "If we should serve up contents from /etc/hosts")="off";
     ::arg().set("serve-rfc1918", "If we should be authoritative for RFC 1918 private IP space")="";
     ::arg().set("auth-can-lower-ttl", "If we follow RFC 2181 to the letter, an authoritative server can lower the TTL of NS records")="off";
+    ::arg().set("lua-dns-script", "Filename containing an optional 'lua' script that will be used to modify dns answers")="";
     ::arg().setSwitch( "ignore-rd-bit", "Assume each packet requires recursion, for compatability" )= "off"; 
 
     ::arg().setCmd("help","Provide a helpful message");

@@ -16,7 +16,7 @@
     along with this program; if not, write to the Free Software
     Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
-// $Id: dns.hh 1094 2007-10-28 17:36:16Z ahu $ 
+// $Id: dns.hh 1185 2008-06-08 08:41:01Z ahu $ 
 /* (C) 2002 POWERDNS.COM BV */
 #ifndef DNS_HH
 #define DNS_HH
@@ -169,7 +169,7 @@ enum  {
 #ifdef WIN32
 #define BYTE_ORDER 1
 #define LITTLE_ENDIAN 1
-#elif __FreeBSD__
+#elif __FreeBSD__ || __APPLE__
 #include <machine/endian.h>
 #elif __linux__
 # include <endian.h>

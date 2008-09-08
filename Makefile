@@ -8,14 +8,21 @@ CFLAGS:=$(CFLAGS) -Wall $(OPTFLAGS) $(PROFILEFLAGS)
 LINKCC=$(CXX)
 CC?=gcc
 
+# Lua 5.1 settings
+LUA_CPPFLAGS_CONFIG ?= -I/usr/include/lua5.1
+LUA_LIBS_CONFIG ?= -llua5.1
+
+# Lua 5.0 settings
+#LUA_CPPFLAGS_CONFIG=-I/usr/include/lua50 
+#LUA_LIBS_CONFIG=-llua50 -llualib50
+
 # static dependencies
 
 PDNS_RECURSOR_OBJECTS=syncres.o  misc.o unix_utility.o qtype.o logger.o  \
 arguments.o lwres.o pdns_recursor.o recursor_cache.o dnsparser.o \
 dnswriter.o dnsrecords.o rcpgenerator.o base64.o zoneparser-tng.o \
-rec_channel.o rec_channel_rec.o malloc.o selectmplexer.o sillyrecords.o \
-dns_random.o aescrypt.o aeskey.o aes_modes.o aestab.o
-
+rec_channel.o rec_channel_rec.o selectmplexer.o sillyrecords.o \
+dns_random.o aescrypt.o aeskey.o aes_modes.o aestab.o lua-pdns-recursor.o
 
 REC_CONTROL_OBJECTS=rec_channel.o rec_control.o arguments.o 
 
@@ -25,14 +32,23 @@ all: message pdns_recursor rec_control
 # OS specific instructions
 -include sysdeps/$(shell uname).inc
 
+ifeq ($(LUA), 1)
+	LUALIBS=$(LUA_LIBS_CONFIG)
+	CXXFLAGS+=$(LUA_CPPFLAGS_CONFIG) -DPDNS_ENABLE_LUA
+endif
+
+
 ifeq ($(STATIC),semi)
-        STATICFLAGS=-Wl,-Bstatic -lstdc++ -lgcc -Wl,-Bdynamic -static-libgcc -lm -lc
-        LINKCC=$(CC)
+	STATICFLAGS=-Wl,-Bstatic -lstdc++ $(LUALIBS) -lgcc -Wl,-Bdynamic -static-libgcc -lm -lc
+	LINKCC=$(CC)
+	LDFLAGS += malloc.o -ldl -lm
+else ifeq ($(STATIC),full)
+	STATICFLAGS=-lstdc++ $(LUALIBS) -ldl -lm -static 
+	LINKCC=$(CC)
+else
+	LDFLAGS += malloc.o $(LUALIBS)
 endif
-ifeq ($(STATIC),full)
-        STATICFLAGS=-lstdc++ -lm -static
-        LINKCC=$(CC)
-endif
+
 
 LDFLAGS += $(PROFILEFLAGS) $(STATICFLAGS)
 
@@ -77,7 +93,7 @@ dep:
 optional:
 	mkdir optional
 
-pdns_recursor: optional $(OPTIONALS) $(PDNS_RECURSOR_OBJECTS) 
+pdns_recursor: optional $(OPTIONALS) $(PDNS_RECURSOR_OBJECTS) malloc.o
 	$(LINKCC) $(PDNS_RECURSOR_OBJECTS) $(wildcard optional/*.o) $(LDFLAGS) -o $@
 
 rec_control: $(REC_CONTROL_OBJECTS)

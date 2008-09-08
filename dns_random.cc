@@ -4,6 +4,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <limits>
 #include "dns_random.hh"
 
 using namespace std;
@@ -23,8 +24,7 @@ void dns_random_init(const char data[16])
   memcpy(g_counter, &now.tv_usec, sizeof(now.tv_usec));
   memcpy(g_counter+sizeof(now.tv_usec), &now.tv_sec, sizeof(now.tv_sec));
   g_in = getpid() | (getppid()<<16);
-
-  srandom(now.tv_usec);
+  srandom(dns_random(numeric_limits<uint32_t>::max()));
 }
 
 static void counterIncrement(unsigned char* counter)

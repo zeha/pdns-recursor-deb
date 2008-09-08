@@ -99,6 +99,12 @@ int asyncresolve(const ComboAddress& ip, const string& domain, int type, bool do
       Socket s(InterNetwork, Stream);
       IPEndpoint ie(U32ToIP(ntohl(ip.sin4.sin_addr.s_addr)), 53);   // WRONG WRONG WRONG XXX FIXME
       s.setNonBlocking();
+      string bindIP=::arg()["query-local-address"];
+      if(!bindIP.empty()) {
+	ComboAddress local(bindIP);
+	s.bind(local.sin4);
+      }
+
       s.connect(ie);
       
       uint16_t tlen=htons(vpacket.size());
@@ -136,11 +142,12 @@ int asyncresolve(const ComboAddress& ip, const string& domain, int type, bool do
     }
   }
 
+  lwr->d_usec=dt.udiff();
+  *now=dt.getTimeval();
+
   if(ret <= 0) // includes 'timeout'
     return ret;
 
-  lwr->d_usec=dt.udiff();
-  *now=dt.getTimeval();
   lwr->d_result.clear();
   try {
     MOADNSParser mdp((const char*)buf.get(), len);
