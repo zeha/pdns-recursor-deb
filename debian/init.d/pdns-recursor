@@ -55,8 +55,17 @@ start_resolvconf() {
 }
 
 stop() {
-  start-stop-daemon --stop --oknodo --quiet --retry=TERM/5/KILL/5 --pidfile $PIDFILE --name $NAME
-  rm -f $PIDFILE	# just in case
+# Return
+#  0 if daemon has been stopped
+#  1 if daemon was already stopped
+#  2 if daemon could not be stopped
+#  other if a failure occured
+  set +e
+  start-stop-daemon --stop --quiet --retry=HUP/30/TERM/5/KILL/5 --pidfile $PIDFILE --name $NAME
+  RETVAL="$?"
+  [ "$RETVAL" = 2 ] && return 2
+  rm -f $PIDFILE
+  return "$RETVAL"
 }
 
 force-stop () {
