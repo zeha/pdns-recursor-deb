@@ -68,11 +68,6 @@ stop() {
   return "$RETVAL"
 }
 
-force-stop () {
-    killall -v -9 pdns_recursor
-    echo "killed"
-}
-
 stop_resolvconf() {
   if [ -x /sbin/resolvconf ]; then
     /sbin/resolvconf -d lo.pdns-recursor
@@ -160,6 +155,11 @@ case "$1" in
       ;;
     esac
   ;;
+  force-stop)
+    killall -v -9 pdns_recursor
+    echo "killed"
+    ;;
+
   *)
     echo "Usage: $0 {start|stop|restart|force-reload|force-stop}" >&2
     exit 3
