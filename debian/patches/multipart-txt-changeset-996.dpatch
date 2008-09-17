@@ -1,0 +1,1267 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## multipart-txt-changeset-996.dpatch by Christoph Haas <haas@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad pdns-recursor~/dnsparser.cc pdns-recursor/dnsparser.cc
+--- pdns-recursor~/dnsparser.cc	2008-09-15 13:24:27.000000000 +0200
++++ pdns-recursor/dnsparser.cc	2008-09-17 21:12:45.000000000 +0200
+@@ -358,17 +358,45 @@
+   return ret;
+ }
+ 
+-string PacketReader::getText()
++static string txtEscape(const string &name)
++{
++  string ret;
++
++  for(string::const_iterator i=name.begin();i!=name.end();++i)
++    if(*i=='"' || *i=='\\'){
++      ret += '\\';
++      ret += *i;
++    }
++    else
++      ret += *i;
++  return ret;
++}
++
++// exceptions thrown here do not result in logging in the main pdns auth server - just so you know!
++string PacketReader::getText(bool multi)
+ {
+   string ret;
+   ret.reserve(40);
++  while(d_pos < d_startrecordpos + d_recordlen ) {
++    if(!ret.empty()) {
++      ret.append(1,' ');
++    }
++    unsigned char labellen=d_content.at(d_pos++);
++    
++    ret.append(1,'"');
++    string val(&d_content.at(d_pos), &d_content.at(d_pos+labellen-1)+1);
++    
++    ret.append(txtEscape(val)); // the end is one beyond the packet
++    ret.append(1,'"');
++    d_pos+=labellen;
++    if(!multi)
++      break;
++  }
+ 
+-  unsigned char labellen=d_content.at(d_pos++);
+-  ret.append(&d_content.at(d_pos), &d_content.at(d_pos+labellen-1)+1); // the end is one beyond the packet
+-  d_pos+=labellen;
+   return ret;
+ }
+ 
++
+ void PacketReader::getLabelFromContent(const vector<uint8_t>& content, uint16_t& frompos, string& ret, int recurs) 
+ {
+   if(recurs > 10)
+diff -urNad pdns-recursor~/dnsparser.hh pdns-recursor/dnsparser.hh
+--- pdns-recursor~/dnsparser.hh	2008-09-15 13:24:27.000000000 +0200
++++ pdns-recursor/dnsparser.hh	2008-09-17 21:12:45.000000000 +0200
+@@ -109,9 +109,9 @@
+     label=getLabel();
+   }
+ 
+-  void xfrText(string &text)
++  void xfrText(string &text, bool multi=false)
+   {
+-    text=getText();
++    text=getText(multi);
+   }
+ 
+   void xfrBlob(string& blob);
+@@ -125,7 +125,7 @@
+   void copyRecord(unsigned char* dest, uint16_t len);
+ 
+   string getLabel(unsigned int recurs=0);
+-  string getText();
++  string getText(bool multi);
+ 
+   uint16_t d_pos;
+ 
+diff -urNad pdns-recursor~/dnsrecords.cc pdns-recursor/dnsrecords.cc
+--- pdns-recursor~/dnsrecords.cc	2008-09-15 13:24:27.000000000 +0200
++++ pdns-recursor/dnsrecords.cc	2008-09-17 21:12:45.000000000 +0200
+@@ -1,6 +1,6 @@
+ /*
+     PowerDNS Versatile Database Driven Nameserver
+-    Copyright (C) 2005 - 2006  PowerDNS.COM BV
++    Copyright (C) 2005 - 2007  PowerDNS.COM BV
+ 
+     This program is free software; you can redistribute it and/or modify
+     it under the terms of the GNU General Public License version 2 as 
+@@ -177,8 +177,8 @@
+ boilerplate_conv(NS, ns_t_ns, conv.xfrLabel(d_content, true));
+ boilerplate_conv(PTR, ns_t_ptr, conv.xfrLabel(d_content, true));
+ boilerplate_conv(CNAME, ns_t_cname, conv.xfrLabel(d_content, true));
+-boilerplate_conv(TXT, ns_t_txt, conv.xfrText(d_text));
+-boilerplate_conv(SPF, 99, conv.xfrText(d_text));
++boilerplate_conv(TXT, ns_t_txt, conv.xfrText(d_text, true));
++boilerplate_conv(SPF, 99, conv.xfrText(d_text, true));
+ boilerplate_conv(HINFO, ns_t_hinfo,  conv.xfrText(d_cpu);   conv.xfrText(d_host));
+ 
+ boilerplate_conv(RP, ns_t_rp,
+diff -urNad pdns-recursor~/dnswriter.cc pdns-recursor/dnswriter.cc
+--- pdns-recursor~/dnswriter.cc	2008-09-15 13:24:27.000000000 +0200
++++ pdns-recursor/dnswriter.cc	2008-09-17 21:12:45.000000000 +0200
+@@ -1,6 +1,7 @@
+ #include "dnswriter.hh"
+ #include "misc.hh"
+ #include "dnsparser.hh"
++#include <boost/tokenizer.hpp>
+ 
+ DNSPacketWriter::DNSPacketWriter(vector<uint8_t>& content, const string& qname, uint16_t  qtype, uint16_t qclass)
+   : d_pos(0), d_content(content), d_qname(qname), d_qtype(qtype), d_qclass(qclass)
+@@ -107,11 +108,22 @@
+   d_record.push_back(val);
+ }
+ 
+-void DNSPacketWriter::xfrText(const string& text)
++void DNSPacketWriter::xfrText(const string& text, bool)
+ {
+-  d_record.push_back(text.length());
+-  const uint8_t* ptr=(uint8_t*)(text.c_str());
+-  d_record.insert(d_record.end(), ptr, ptr+text.size());
++  escaped_list_separator<char> sep('\\', ' ' , '"');
++  tokenizer<escaped_list_separator<char> > tok(text, sep);
++
++  tokenizer<escaped_list_separator<char> >::iterator beg=tok.begin();
++
++  if(beg==tok.end()) {
++    d_record.push_back(0);
++  }
++  else 
++    for(; beg!=tok.end(); ++beg){
++      d_record.push_back(beg->length());
++      const uint8_t* ptr=(uint8_t*)(beg->c_str());
++      d_record.insert(d_record.end(), ptr, ptr+beg->length());
++    }
+ }
+ 
+ // this is the absolute hottest function in the pdns recursor
+diff -urNad pdns-recursor~/dnswriter.cc.orig pdns-recursor/dnswriter.cc.orig
+--- pdns-recursor~/dnswriter.cc.orig	1970-01-01 01:00:00.000000000 +0100
++++ pdns-recursor/dnswriter.cc.orig	2008-09-15 13:24:27.000000000 +0200
+@@ -0,0 +1,226 @@
++#include "dnswriter.hh"
++#include "misc.hh"
++#include "dnsparser.hh"
++
++DNSPacketWriter::DNSPacketWriter(vector<uint8_t>& content, const string& qname, uint16_t  qtype, uint16_t qclass)
++  : d_pos(0), d_content(content), d_qname(qname), d_qtype(qtype), d_qclass(qclass)
++{
++  d_content.clear();
++  dnsheader dnsheader;
++  
++  memset(&dnsheader, 0, sizeof(dnsheader));
++  dnsheader.id=0;
++  dnsheader.qdcount=htons(1);
++  
++  const uint8_t* ptr=(const uint8_t*)&dnsheader;
++  uint32_t len=d_content.size();
++  d_content.resize(len + sizeof(dnsheader));
++  uint8_t* dptr=(&*d_content.begin()) + len;
++  
++  memcpy(dptr, ptr, sizeof(dnsheader));
++  d_stuff=0;
++  xfrLabel(qname, false);
++  
++  len=d_content.size();
++  d_content.resize(len + d_record.size() + 4);
++
++  ptr=&*d_record.begin();
++  dptr=(&*d_content.begin()) + len;
++  
++  memcpy(dptr, ptr, d_record.size());
++
++  len+=d_record.size();
++  d_record.clear();
++
++  qtype=htons(qtype);
++  qclass=htons(qclass);
++
++  vector<uint8_t>::iterator i=d_content.begin()+len; // this works around a gcc 3.4 bug
++  memcpy(&*i, &qtype, 2);
++  i+=2;
++  memcpy(&*i, &qclass, 2);
++
++  d_stuff=0xffff;
++}
++
++dnsheader* DNSPacketWriter::getHeader()
++{
++  return (dnsheader*)&*d_content.begin();
++}
++
++
++void DNSPacketWriter::startRecord(const string& name, uint16_t qtype, uint32_t ttl, uint16_t qclass, Place place)
++{
++  if(!d_record.empty()) 
++    commit();
++
++  d_recordqname=name;
++  d_recordqtype=qtype;
++  d_recordqclass=qclass;
++  d_recordttl=ttl;
++  d_recordplace=place;
++
++  d_stuff = 0; 
++  d_rollbackmarker=d_content.size();
++
++  xfrLabel(d_recordqname, true);
++  d_content.insert(d_content.end(), d_record.begin(), d_record.end());
++  d_record.clear();
++
++  d_stuff = sizeof(dnsrecordheader); // this is needed to get compressed label offsets right, the dnsrecordheader will be interspersed
++  d_sor=d_content.size() + d_stuff; // start of real record 
++}
++
++void DNSPacketWriter::addOpt(int udpsize, int extRCode, int Z)
++{
++  uint32_t ttl=0;
++
++  EDNS0Record stuff;
++
++  stuff.extRCode=extRCode;
++  stuff.version=0;
++  stuff.Z=htons(Z);
++  
++  memcpy(&ttl, &stuff, sizeof(stuff));
++
++  ttl=ntohl(ttl); // will be reversed later on
++  
++  startRecord("", ns_t_opt, ttl, udpsize, ADDITIONAL);
++}
++
++void DNSPacketWriter::xfr32BitInt(uint32_t val)
++{
++  int rval=htonl(val);
++  uint8_t* ptr=reinterpret_cast<uint8_t*>(&rval);
++  d_record.insert(d_record.end(), ptr, ptr+4);
++}
++
++void DNSPacketWriter::xfr16BitInt(uint16_t val)
++{
++  uint16_t rval=htons(val);
++  uint8_t* ptr=reinterpret_cast<uint8_t*>(&rval);
++  d_record.insert(d_record.end(), ptr, ptr+2);
++}
++
++void DNSPacketWriter::xfr8BitInt(uint8_t val)
++{
++  d_record.push_back(val);
++}
++
++void DNSPacketWriter::xfrText(const string& text)
++{
++  d_record.push_back(text.length());
++  const uint8_t* ptr=(uint8_t*)(text.c_str());
++  d_record.insert(d_record.end(), ptr, ptr+text.size());
++}
++
++// this is the absolute hottest function in the pdns recursor
++void DNSPacketWriter::xfrLabel(const string& label, bool compress)
++{
++  typedef vector<pair<unsigned int, unsigned int> > parts_t;
++  parts_t parts;
++  vstringtok(parts, label, "."); // XXX FIXME this should deal with escaped .
++  
++  // d_stuff is amount of stuff that is yet to be written out - the dnsrecordheader for example
++  unsigned int pos=d_content.size() + d_record.size() + d_stuff; 
++  string chopped(label);
++
++  for(parts_t::const_iterator i=parts.begin(); i!=parts.end(); ++i) {
++    //    cerr<<"chopped: '"<<chopped<<"'\n";
++    map<string, uint16_t>::iterator li=d_labelmap.end();
++    // see if we've written out this domain before
++    if(compress && (li=d_labelmap.find(chopped))!=d_labelmap.end()) {   
++      uint16_t offset=li->second;
++      offset|=0xc000;
++      d_record.push_back((char)(offset >> 8));
++      d_record.push_back((char)(offset & 0xff));
++      goto out;                                 // skip trailing 0 in case of compression
++    }
++
++    if(li==d_labelmap.end() && pos< 16384)
++      d_labelmap[chopped]=pos;                       //  if untrue, we need to count - also, don't store offsets > 16384, won't work
++    
++    d_record.push_back((char)(i->second - i->first));
++    unsigned int len=d_record.size();
++    d_record.resize(len + i->second - i->first);
++    memcpy(((&*d_record.begin()) + len), label.c_str() + i-> first, i->second - i->first);
++    //    cerr<<"Added: '"<<string(label.c_str() + i->first, i->second - i->first) <<"'\n";
++    pos+=(i->second - i->first)+1;
++    chopOff(chopped);                   // www.powerdns.com. -> powerdns.com. -> com. -> .
++  }
++  d_record.push_back(0);
++
++ out:;
++}
++
++void DNSPacketWriter::xfrBlob(const string& blob)
++{
++  const uint8_t* ptr=reinterpret_cast<const uint8_t*>(blob.c_str());
++
++  d_record.insert(d_record.end(), ptr, ptr+blob.size());
++}
++
++void DNSPacketWriter::xfrHexBlob(const string& blob)
++{
++  xfrBlob(blob);
++}
++
++
++void DNSPacketWriter::getRecords(string& records)
++{
++  records.assign(d_content.begin() + d_sor, d_content.end());
++}
++
++uint16_t DNSPacketWriter::size()
++{
++  return d_content.size() + d_stuff + d_record.size();
++}
++
++void DNSPacketWriter::rollback()
++{
++  d_content.resize(d_rollbackmarker);
++  d_record.clear();
++  d_stuff=0;
++}
++
++void DNSPacketWriter::commit()
++{
++  if(d_stuff==0xffff && (d_content.size()!=d_sor || !d_record.empty()))
++    throw MOADNSException("DNSPacketWriter::commit() called without startRecord ever having been called, but a record was added");
++  // build dnsrecordheader
++  struct dnsrecordheader drh;
++  drh.d_type=htons(d_recordqtype);
++  drh.d_class=htons(d_recordqclass);
++  drh.d_ttl=htonl(d_recordttl);
++  drh.d_clen=htons(d_record.size());
++  
++  // and write out the header
++  const uint8_t* ptr=(const uint8_t*)&drh;
++  d_content.insert(d_content.end(), ptr, ptr+sizeof(drh));
++
++  d_stuff=0;
++
++  // write out d_record
++  d_content.insert(d_content.end(), d_record.begin(), d_record.end());
++
++  dnsheader* dh=reinterpret_cast<dnsheader*>( &*d_content.begin());
++  switch(d_recordplace) {
++  case ANSWER:
++    dh->ancount = htons(ntohs(dh->ancount) + 1);
++    break;
++  case AUTHORITY:
++    dh->nscount = htons(ntohs(dh->nscount) + 1);
++    break;
++  case ADDITIONAL:
++    dh->arcount = htons(ntohs(dh->arcount) + 1);
++    break;
++  }
++
++  d_record.clear();   // clear d_record, ready for next record
++}
++
++
++
++
++
++
+diff -urNad pdns-recursor~/dnswriter.hh pdns-recursor/dnswriter.hh
+--- pdns-recursor~/dnswriter.hh	2008-09-15 13:24:27.000000000 +0200
++++ pdns-recursor/dnswriter.hh	2008-09-17 21:12:45.000000000 +0200
+@@ -81,7 +81,7 @@
+   void xfr8BitInt(uint8_t val);
+ 
+   void xfrLabel(const string& label, bool compress=false);
+-  void xfrText(const string& text);
++  void xfrText(const string& text, bool multi=false);
+   void xfrBlob(const string& blob);
+   void xfrHexBlob(const string& blob);
+ 
+diff -urNad pdns-recursor~/dnswriter.hh.orig pdns-recursor/dnswriter.hh.orig
+--- pdns-recursor~/dnswriter.hh.orig	1970-01-01 01:00:00.000000000 +0100
++++ pdns-recursor/dnswriter.hh.orig	2008-09-15 13:24:27.000000000 +0200
+@@ -0,0 +1,107 @@
++#ifndef PDNS_DNSWRITER_HH
++#define PDNS_DNSWRITER_HH
++
++#include <string>
++#include <vector>
++#include <map>
++#if !defined SOLARIS8 && !defined WIN32
++#include <stdint.h>
++#elif defined WIN32
++#include "utility.hh"
++#endif
++#include "dns.hh"
++using namespace std;
++
++/** this class can be used to write DNS packets. It knows about DNS in the sense that it makes 
++    the packet header and record headers.
++
++    The model is:
++
++    packetheader (recordheader recordcontent)*
++
++    The packetheader needs to be updated with the amount of packets of each kind (answer, auth, additional)
++    
++    Each recordheader contains the length of a dns record.
++
++    Calling convention:
++
++    vector<uint8_t> content;
++    DNSPacketWriter dpw(content, const string& qname, uint16_t qtype, uint16_t qclass=1);  // sets the question
++    dpw.startrecord("this.is.an.ip.address.", ns_t_a);    // does nothing, except store qname and qtype
++    dpw.xfr32BitInt(0x01020304);                         // adds 4 bytes (0x01020304) to the record buffer
++    dpw.startrecord("this.is.an.ip.address.", ns_t_a);    // aha! writes out dnsrecord header containing qname and qtype and length 4, plus the recordbuffer, which gets emptied
++                                                         // new qname and qtype are stored
++    dpw.xfr32BitInt(0x04030201);                         // adds 4 bytes (0x04030201) to the record buffer
++    dpw.commit();                                        // writes out dnsrecord header containing qname and qtype and length 4, plus the recordbuffer
++
++    // content now contains the ready packet, with 1 question and 2 answers
++
++*/
++
++class DNSPacketWriter
++{
++public:
++  enum Place {ANSWER=1, AUTHORITY=2, ADDITIONAL=3}; 
++
++  //! Start a DNS Packet in the vector passed, with question qname, qtype and qclass
++  DNSPacketWriter(vector<uint8_t>& content, const string& qname, uint16_t  qtype, uint16_t qclass=1);
++  
++  /** Start a new DNS record within this packet for namq, qtype, ttl, class and in the requested place. Note that packets can only be written in natural order - 
++      ANSWER, AUTHORITY, ADDITIONAL */
++  void startRecord(const string& name, uint16_t qtype, uint32_t ttl=3600, uint16_t qclass=1, Place place=ANSWER);
++
++  /** Shorthand way to add an Opt-record, for example for EDNS0 purposes */
++  void addOpt(int udpsize, int extRCode, int Z);
++
++  /** needs to be called after the last record is added, but can be called again and again later on. Is called internally by startRecord too.
++      The content of the vector<> passed to the constructor is inconsistent until commit is called.
++   */
++  void commit();
++
++  uint16_t size();
++
++  /** Should the packet have grown too big for the writer's liking, rollback removes the record currently being written */
++  void rollback();
++
++  void xfr32BitInt(uint32_t val);
++  void xfr16BitInt(uint16_t val);
++  void xfrType(uint16_t val)
++  {
++    xfr16BitInt(val);
++  }
++  void xfrIP(const uint32_t& val)
++  {
++    xfr32BitInt(htonl(val));
++  }
++  void xfrTime(const uint32_t& val)
++  {
++    xfr32BitInt(val);
++  }
++
++  void xfr8BitInt(uint8_t val);
++
++  void xfrLabel(const string& label, bool compress=false);
++  void xfrText(const string& text);
++  void xfrBlob(const string& blob);
++  void xfrHexBlob(const string& blob);
++
++  uint16_t d_pos;
++  
++  dnsheader* getHeader();
++  void getRecords(string& records);
++
++private:
++  vector<uint8_t>& d_content;
++  vector <uint8_t> d_record;
++  string d_qname;
++  uint16_t d_qtype, d_qclass;
++  string d_recordqname;
++  uint16_t d_recordqtype, d_recordqclass;
++  uint32_t d_recordttl;
++  map<string, uint16_t> d_labelmap;
++  uint16_t d_stuff;
++  uint16_t d_sor;
++  uint16_t d_rollbackmarker; // start of last complete packet, for rollback
++  Place d_recordplace;
++};
++#endif
+diff -urNad pdns-recursor~/rcpgenerator.cc pdns-recursor/rcpgenerator.cc
+--- pdns-recursor~/rcpgenerator.cc	2008-09-15 13:24:27.000000000 +0200
++++ pdns-recursor/rcpgenerator.cc	2008-09-17 21:12:45.000000000 +0200
+@@ -177,25 +177,33 @@
+   HEXDecode(d_string.c_str()+pos, d_string.c_str() + d_pos, val);
+ }
+ 
+-
+-void RecordTextReader::xfrText(string& val)
++void RecordTextReader::xfrText(string& val, bool multi)
+ {
+-  skipSpaces();
+-  if(d_string[d_pos]!='"')
+-    throw RecordTextException("Data field in DNS should start with quote (\") at position "+lexical_cast<string>(d_pos)+" of '"+d_string+"'");
+-
+   val.clear();
+   val.reserve(d_end - d_pos);
+-  
+-  while(++d_pos < d_end && d_string[d_pos]!='"') {
+-    if(d_string[d_pos]=='\\' && d_pos+1!=d_end) {
+-      ++d_pos;
++
++  while(d_pos != d_end) {
++    if(!val.empty())
++      val.append(1, ' ');
++
++    skipSpaces();
++    if(d_string[d_pos]!='"')
++      throw RecordTextException("Data field in DNS should start with quote (\") at position "+lexical_cast<string>(d_pos)+" of '"+d_string+"'");
++
++    val.append(1, '"');
++    while(++d_pos < d_end && d_string[d_pos]!='"') {
++      if(d_string[d_pos]=='\\' && d_pos+1!=d_end) {
++	val.append(1, d_string[d_pos++]);
++      }
++      val.append(1, d_string[d_pos]);
+     }
+-    val.append(1, d_string[d_pos]);
++    val.append(1,'"');
++    if(d_pos == d_end)
++      throw RecordTextException("Data field in DNS should end on a quote (\") in '"+d_string+"'");
++    d_pos++;
++    if(!multi)
++      break;
+   }
+-  if(d_pos == d_end)
+-    throw RecordTextException("Data field in DNS should end on a quote (\") in '"+d_string+"'");
+-  d_pos++;
+ }
+ 
+ void RecordTextReader::xfrType(uint16_t& val)
+@@ -337,25 +345,12 @@
+   }
+ }
+ 
+-void RecordTextWriter::xfrText(const string& val)
++void RecordTextWriter::xfrText(const string& val, bool multi)
+ {
+   if(!d_string.empty())
+     d_string.append(1,' ');
+-  d_string.append(1,'"');
+-
+-  if(val.find_first_of("\\\"") == string::npos)
+-    d_string+=val;
+-  else {
+-    string::size_type end=val.size();
+-    
+-    for(string::size_type pos=0; pos < end; ++pos) {
+-      if(val[pos]=='\'' || val[pos]=='"')
+-	d_string.append(1,'\\');
+-      d_string.append(1, val[pos]);
+-    }
+-  }
+ 
+-  d_string.append(1,'"');
++  d_string.append(val);
+ }
+ 
+ 
+diff -urNad pdns-recursor~/rcpgenerator.cc.orig pdns-recursor/rcpgenerator.cc.orig
+--- pdns-recursor~/rcpgenerator.cc.orig	1970-01-01 01:00:00.000000000 +0100
++++ pdns-recursor/rcpgenerator.cc.orig	2008-09-15 13:24:27.000000000 +0200
+@@ -0,0 +1,401 @@
++/*
++    PowerDNS Versatile Database Driven Nameserver
++    Copyright (C) 2005  PowerDNS.COM BV
++
++    This program is free software; you can redistribute it and/or modify
++    it under the terms of the GNU General Public License version 2 as 
++    published by the Free Software Foundation
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program; if not, write to the Free Software
++    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
++*/
++
++#include "rcpgenerator.hh"
++#include "dnsparser.hh"
++#include "misc.hh"
++#include <boost/lexical_cast.hpp>
++#include <iostream>
++#include "base64.hh"
++using namespace boost;
++
++RecordTextReader::RecordTextReader(const string& str, const string& zone) : d_string(str), d_zone(zone), d_pos(0), d_end(str.size())
++{
++}
++
++void RecordTextReader::xfr32BitInt(uint32_t &val)
++{
++  skipSpaces();
++
++  if(!isdigit(d_string.at(d_pos)))
++    throw RecordTextException("expected digits at position "+lexical_cast<string>(d_pos)+" in '"+d_string+"'");
++
++  char *endptr;
++  unsigned long ret=strtoul(d_string.c_str() + d_pos, &endptr, 10);
++  val=ret;
++  
++  d_pos = endptr - d_string.c_str();
++}
++
++void RecordTextReader::xfrTime(uint32_t &val)
++{
++  struct tm tm;
++  memset(&tm, 0, sizeof(tm));
++  
++  string tmp;
++  xfrLabel(tmp); // ends on number, so this works 
++
++  sscanf(tmp.c_str(), "%04d%02d%02d" "%02d%02d%02d", 
++	 &tm.tm_year, &tm.tm_mon, &tm.tm_mday, 
++	 &tm.tm_hour, &tm.tm_min, &tm.tm_sec);
++
++  tm.tm_year-=1900;
++  tm.tm_min-=1;
++  
++  val=(uint32_t)mktime(&tm);
++}
++
++void RecordTextReader::xfrIP(uint32_t &val)
++{
++  skipSpaces();
++
++  if(!isdigit(d_string.at(d_pos)))
++    throw RecordTextException("while parsing IP address, expected digits at position "+lexical_cast<string>(d_pos)+" in '"+d_string+"'");
++  
++  string ip;
++  xfrLabel(ip);
++  if(!IpToU32(ip, &val))
++    throw RecordTextException("unable to parse IP address '"+ip+"'");
++}
++
++
++bool RecordTextReader::eof()
++{
++  return d_pos==d_end;
++}
++
++void RecordTextReader::xfr16BitInt(uint16_t &val)
++{
++  uint32_t tmp;
++  xfr32BitInt(tmp);
++  val=tmp;
++  if(val!=tmp)
++    throw RecordTextException("Overflow reading 16 bit integer from record content"); // fixme improve
++}
++
++void RecordTextReader::xfr8BitInt(uint8_t &val)
++{
++  uint32_t tmp;
++  xfr32BitInt(tmp);
++  val=tmp;
++  if(val!=tmp)
++    throw RecordTextException("Overflow reading 8 bit integer from record content"); // fixme improve
++}
++
++void RecordTextReader::xfrLabel(string& val, bool) 
++{
++  skipSpaces();
++  val.clear();
++  val.reserve(d_end - d_pos);
++
++  const char* strptr=d_string.c_str();
++  while(d_pos < d_end) {
++    if(dns_isspace(strptr[d_pos]))
++      break;
++
++    if(strptr[d_pos]=='\\' && d_pos < d_end - 1) 
++      d_pos++;
++
++    val.append(1, strptr[d_pos]);      
++    d_pos++;
++  }
++
++  if(val.empty())
++    val=d_zone;
++  else if(!d_zone.empty()) {
++    char last=val[val.size()-1];
++   
++    if(last =='.')
++      val.resize(val.size()-1);
++    else if(last != '.' && !isdigit(last)) // don't add zone to IP address
++      val+="."+d_zone;
++  }
++}
++
++void RecordTextReader::xfrBlob(string& val)
++{
++  skipSpaces();
++  int pos=(int)d_pos;
++  const char* strptr=d_string.c_str();
++  while(d_pos < d_end && !dns_isspace(strptr[d_pos]))
++    d_pos++;
++
++  string tmp;
++  tmp.assign(d_string.c_str()+pos, d_string.c_str() + d_pos);
++  val.clear();
++  B64Decode(tmp, val);
++}
++
++
++static inline uint8_t hextodec(uint8_t val)
++{
++  if(val >= '0' && val<='9')
++    return val-'0';
++  else if(val >= 'A' && val<='F')
++    return 10+(val-'A');
++  else if(val >= 'a' && val<='f')
++    return 10+(val-'a');
++  else
++    throw RecordTextException("Unknown hexadecimal character '"+lexical_cast<string>(val)+"'");
++}
++
++
++void HEXDecode(const char* begin, const char* end, string& val)
++{
++  if((end - begin)%2)
++    throw RecordTextException("Hexadecimal blob with odd number of characters");
++
++  int limit=(int)(end-begin)/2;
++  val.resize(limit);
++  for(int n=0; n < limit; ++n) {
++    val[n] = hextodec(begin[2*n])*16 + hextodec(begin[2*n+1]); 
++  }
++}
++
++void RecordTextReader::xfrHexBlob(string& val)
++{
++  skipSpaces();
++  int pos=(int)d_pos;
++  while(d_pos < d_end && !dns_isspace(d_string[d_pos]))
++    d_pos++;
++
++  HEXDecode(d_string.c_str()+pos, d_string.c_str() + d_pos, val);
++}
++
++
++void RecordTextReader::xfrText(string& val)
++{
++  skipSpaces();
++  if(d_string[d_pos]!='"')
++    throw RecordTextException("Data field in DNS should start with quote (\") at position "+lexical_cast<string>(d_pos)+" of '"+d_string+"'");
++
++  val.clear();
++  val.reserve(d_end - d_pos);
++  
++  while(++d_pos < d_end && d_string[d_pos]!='"') {
++    if(d_string[d_pos]=='\\' && d_pos+1!=d_end) {
++      ++d_pos;
++    }
++    val.append(1, d_string[d_pos]);
++  }
++  if(d_pos == d_end)
++    throw RecordTextException("Data field in DNS should end on a quote (\") in '"+d_string+"'");
++  d_pos++;
++}
++
++void RecordTextReader::xfrType(uint16_t& val)
++{
++  skipSpaces();
++  int pos=(int)d_pos;
++  while(d_pos < d_end && !dns_isspace(d_string[d_pos]))
++    d_pos++;
++
++  string tmp;
++  tmp.assign(d_string.c_str()+pos, d_string.c_str() + d_pos);
++
++  val=DNSRecordContent::TypeToNumber(tmp);
++}
++
++
++void RecordTextReader::skipSpaces()
++{
++  const char* strptr = d_string.c_str();
++  while(d_pos < d_end && dns_isspace(strptr[d_pos]))
++    d_pos++;
++  if(d_pos == d_end)
++    throw RecordTextException("missing field at the end of record content '"+d_string+"'");
++}
++
++
++RecordTextWriter::RecordTextWriter(string& str) : d_string(str)
++{
++  d_string.clear();
++}
++
++void RecordTextWriter::xfr32BitInt(const uint32_t& val)
++{
++  if(!d_string.empty())
++    d_string.append(1,' ');
++  d_string+=lexical_cast<string>(val);
++}
++
++
++
++void RecordTextWriter::xfrType(const uint16_t& val)
++{
++  if(!d_string.empty())
++    d_string.append(1,' ');
++  d_string+=DNSRecordContent::NumberToType(val);
++}
++
++// this function is on the fast path for the pdns_recursor
++void RecordTextWriter::xfrIP(const uint32_t& val)
++{
++  if(!d_string.empty())
++    d_string.append(1,' ');
++
++  char tmp[17];
++  snprintf(tmp, sizeof(tmp)-1, "%u.%u.%u.%u", 
++	   (val >> 24)&0xff,
++	   (val >> 16)&0xff,
++	   (val >>  8)&0xff,
++	   (val      )&0xff);
++  
++  d_string+=tmp;
++}
++
++
++void RecordTextWriter::xfrTime(const uint32_t& val)
++{
++  if(!d_string.empty())
++    d_string.append(1,' ');
++  
++  struct tm tm;
++  time_t time=val; // Y2038 bug!
++#ifndef WIN32
++  gmtime_r(&time, &tm);
++#else
++  struct tm* tmptr;
++  tmptr=gmtime(&time);
++  if(!tmptr)
++    throw RecordTextException("Unable to convert timestamp into pretty printable time");
++  tm=*tmptr;
++#endif
++  
++  char tmp[16];
++  snprintf(tmp,sizeof(tmp)-1, "%04d%02d%02d" "%02d%02d%02d", 
++	   tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday, 
++	   tm.tm_hour, tm.tm_min, tm.tm_sec);
++  
++  d_string += tmp;
++}
++
++
++void RecordTextWriter::xfr16BitInt(const uint16_t& val)
++{
++  xfr32BitInt(val);
++}
++
++void RecordTextWriter::xfr8BitInt(const uint8_t& val)
++{
++  xfr32BitInt(val);
++}
++
++
++void RecordTextWriter::xfrLabel(const string& val, bool)
++{
++  if(!d_string.empty())
++    d_string.append(1,' ');
++  if(val.find(' ')==string::npos) 
++    d_string+=val;
++  else {
++    d_string.reserve(d_string.size()+val.size()+3);
++    for(string::size_type pos=0; pos < val.size() ; ++pos)
++      if(dns_isspace(val[pos]))
++	d_string+="\\ ";
++      else if(val[pos]=='\\')
++	d_string.append(1,'\\');
++      else
++	d_string.append(1,val[pos]);
++  }
++  //  d_string.append(1,'.');
++}
++
++void RecordTextWriter::xfrBlob(const string& val)
++{
++  if(!d_string.empty())
++    d_string.append(1,' ');
++
++  d_string+=Base64Encode(val);
++}
++
++void RecordTextWriter::xfrHexBlob(const string& val)
++{
++  if(!d_string.empty())
++    d_string.append(1,' ');
++
++  string::size_type limit=val.size();
++  char tmp[5];
++  for(string::size_type n = 0; n < limit; ++n) {
++    snprintf(tmp, sizeof(tmp)-1, "%02x", (unsigned char)val[n]);
++    d_string+=tmp;
++  }
++}
++
++void RecordTextWriter::xfrText(const string& val)
++{
++  if(!d_string.empty())
++    d_string.append(1,' ');
++  d_string.append(1,'"');
++
++  if(val.find_first_of("\\\"") == string::npos)
++    d_string+=val;
++  else {
++    string::size_type end=val.size();
++    
++    for(string::size_type pos=0; pos < end; ++pos) {
++      if(val[pos]=='\'' || val[pos]=='"')
++	d_string.append(1,'\\');
++      d_string.append(1, val[pos]);
++    }
++  }
++
++  d_string.append(1,'"');
++}
++
++
++#ifdef TESTING
++
++int main(int argc, char**argv)
++try
++{
++  RecordTextReader rtr(argv[1], argv[2]);
++  
++  unsigned int order, pref;
++  string flags, services, regexp, replacement;
++  string mx;
++
++  rtr.xfrInt(order);
++  rtr.xfrInt(pref);
++  rtr.xfrText(flags);
++  rtr.xfrText(services);
++  rtr.xfrText(regexp);
++  rtr.xfrLabel(replacement);
++
++  cout<<"order: "<<order<<", pref: "<<pref<<"\n";
++  cout<<"flags: \""<<flags<<"\", services: \""<<services<<"\", regexp: \""<<regexp<<"\", replacement: "<<replacement<<"\n";
++
++  string out;
++  RecordTextWriter rtw(out);
++
++  rtw.xfrInt(order);
++  rtw.xfrInt(pref);
++  rtw.xfrText(flags);
++  rtw.xfrText(services);
++  rtw.xfrText(regexp);
++  rtw.xfrLabel(replacement);
++
++  cout<<"Regenerated: '"<<out<<"'\n";
++  
++}
++catch(exception& e)
++{
++  cerr<<"Fatal: "<<e.what()<<endl;
++}
++
++#endif
+diff -urNad pdns-recursor~/rcpgenerator.hh pdns-recursor/rcpgenerator.hh
+--- pdns-recursor~/rcpgenerator.hh	2008-09-15 13:24:27.000000000 +0200
++++ pdns-recursor/rcpgenerator.hh	2008-09-17 21:12:45.000000000 +0200
+@@ -50,7 +50,7 @@
+   void xfrTime(uint32_t& val);
+ 
+   void xfrLabel(string& val, bool compress=false);
+-  void xfrText(string& val);
++  void xfrText(string& val, bool multi=false);
+   void xfrHexBlob(string& val);
+   void xfrBlob(string& val);
+ 
+@@ -75,7 +75,7 @@
+ 
+   void xfrType(const uint16_t& val);
+   void xfrLabel(const string& val, bool compress=false);
+-  void xfrText(const string& val);
++  void xfrText(const string& val, bool multi=false);
+   void xfrBlob(const string& val);
+   void xfrHexBlob(const string& val);
+ 
+diff -urNad pdns-recursor~/zoneparser-tng.cc pdns-recursor/zoneparser-tng.cc
+--- pdns-recursor~/zoneparser-tng.cc	2008-09-15 13:24:27.000000000 +0200
++++ pdns-recursor/zoneparser-tng.cc	2008-09-17 21:12:45.000000000 +0200
+@@ -157,8 +157,7 @@
+       continue;
+     }
+     catch(...) {
+-      cerr<<"Oops, this doesn't look like a qtype, stopping loop\n";
+-      break;
++      throw runtime_error("Parsing zone content line: '"+nextpart+"' doesn't look like a qtype, stopping loop");
+     }
+   }
+   if(!haveQTYPE) 
+diff -urNad pdns-recursor~/zoneparser-tng.cc.orig pdns-recursor/zoneparser-tng.cc.orig
+--- pdns-recursor~/zoneparser-tng.cc.orig	1970-01-01 01:00:00.000000000 +0100
++++ pdns-recursor/zoneparser-tng.cc.orig	2008-09-15 13:24:27.000000000 +0200
+@@ -0,0 +1,248 @@
++/*
++    PowerDNS Versatile Database Driven Nameserver
++    Copyright (C) 2005 - 2006  PowerDNS.COM BV
++
++    This program is free software; you can redistribute it and/or modify
++    it under the terms of the GNU General Public License version 2 
++    as published by the Free Software Foundation
++
++    This program is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with this program; if not, write to the Free Software
++    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
++*/
++
++#include "dnsparser.hh"
++#include "sstuff.hh"
++#include "misc.hh"
++#include "dnswriter.hh"
++#include "dnsrecords.hh"
++#include "misc.hh"
++#include <fstream>
++#include "dns.hh"
++#include "zoneparser-tng.hh"
++#include <deque>
++#include <boost/algorithm/string.hpp>
++#include <boost/lexical_cast.hpp>
++
++ZoneParserTNG::ZoneParserTNG(const string& fname, const string& zname) : d_zonename(zname), d_defaultttl(3600)
++{
++  d_fp=fopen(fname.c_str(), "r");
++  if(!d_fp)
++    throw runtime_error("Unable to open file '"+fname+"': "+stringerror());
++}
++
++ZoneParserTNG::~ZoneParserTNG()
++{
++  fclose(d_fp);
++}
++
++static string makeString(const string& line, const pair<string::size_type, string::size_type>& range)
++{
++  return string(line.c_str() + range.first, range.second - range.first);
++}
++
++static unsigned int makeTTLFromZone(const string& str)
++{
++  if(str.empty())
++    return 0;
++
++  unsigned int val=atoi(str.c_str());
++  char lc=toupper(str[str.length()-1]);
++  if(!isdigit(lc))
++    switch(lc) {
++    case 'H':
++      val*=3600;
++      break;
++    case 'D':
++      val*=3600*24;
++      break;
++    case 'W':
++      val*=3600*24*7;
++      break;
++    case 'M':
++      val*=3600*24*7*4;
++      break;
++    case 'Y': // ? :-)
++      val*=3600*24*365;
++      break;
++    default:
++      throw ZoneParserTNG::exception("Unable to parse time specification '"+str+"'");
++    }
++  return val;
++}
++
++bool ZoneParserTNG::get(DNSResourceRecord& rr) 
++{
++ retry:;
++  if(!getLine())
++    return false;
++
++  chomp(d_line, " \r\n\x1a");
++  deque<pair<string::size_type, string::size_type> > parts;
++  vstringtok(parts, d_line);
++
++  if(parts.empty())
++    goto retry;
++
++  if(d_line[0]=='$') { 
++    if(makeString(d_line, parts[0])=="$TTL" && parts.size() > 1)
++      d_defaultttl=makeTTLFromZone(makeString(d_line,parts[1]));
++    else
++      throw exception("Can't parse zone line '"+d_line+"'");
++    goto retry;
++  }
++
++
++  if(isspace(d_line[0])) 
++    rr.qname=d_prevqname;
++  else {
++    rr.qname=makeString(d_line, parts[0]); 
++    parts.pop_front();
++    if(rr.qname.empty() || rr.qname[0]==';')
++      goto retry;
++  }
++  if(rr.qname=="@")
++    rr.qname=d_zonename;
++  else if(!isCanonical(rr.qname)) {
++    rr.qname.append(1,'.');
++    rr.qname.append(d_zonename);
++  }
++  d_prevqname=rr.qname;
++
++  if(parts.empty()) 
++    throw exception("Line with too little parts");
++
++  // cout<<"Have qname: '"<<rr.qname<<"'\n";
++
++  string nextpart;
++  
++  rr.ttl=d_defaultttl;
++  bool haveTTL=0, haveQTYPE=0;
++  pair<string::size_type, string::size_type> range;
++
++  while(!parts.empty()) {
++    range=parts.front();
++    parts.pop_front();
++    nextpart=makeString(d_line, range);
++    if(nextpart.empty())
++      break;
++
++    if(nextpart.find(';')!=string::npos)
++      break;
++
++    // cout<<"Next part: '"<<nextpart<<"'"<<endl;
++    
++    if(!Utility::strcasecmp(nextpart.c_str(), "IN")) {
++      // cout<<"Ignoring 'IN'\n";
++      continue;
++    }
++    if(!haveTTL && !haveQTYPE && all(nextpart, is_digit())) {
++      rr.ttl=makeTTLFromZone(nextpart);
++      haveTTL=true;
++      // cout<<"ttl is probably: "<<rr.ttl<<endl;
++      continue;
++    }
++    if(haveQTYPE) 
++      break;
++
++    try {
++      rr.qtype=DNSRecordContent::TypeToNumber(nextpart);
++      // cout<<"Got qtype ("<<rr.qtype.getCode()<<")\n";
++      haveQTYPE=1;
++      continue;
++    }
++    catch(...) {
++      cerr<<"Oops, this doesn't look like a qtype, stopping loop\n";
++      break;
++    }
++  }
++  if(!haveQTYPE) 
++    throw exception("Malformed line '"+d_line+"'");
++
++  rr.content=d_line.substr(range.first);
++
++  string::size_type pos=rr.content.rfind(';');
++  if(pos!=string::npos)
++    rr.content.resize(pos);
++
++  if(rr.qtype.getCode()!=QType::TXT && (pos=rr.content.find('('))!=string::npos) {
++    rr.content.resize(pos); // chop off (
++    trim(rr.content);
++    while(getLine()) {
++      chomp(d_line,"\r\n ");
++      pos=d_line.rfind(';');
++      if(pos!=string::npos)
++	d_line.resize(pos);
++
++      trim(d_line);
++      
++      pos=d_line.find(')');
++      if(pos!=string::npos) {
++	d_line.resize(pos);
++	trim(d_line);
++	rr.content+=" "+d_line;
++	break;
++      }
++      rr.content+=" "+d_line;
++    }
++  }
++  vector<string> soaparts;
++  switch(rr.qtype.getCode()) {
++  case QType::MX:
++  case QType::NS:
++  case QType::CNAME:
++  case QType::PTR:
++  case QType::SRV:
++    rr.content=toCanonic(d_zonename, rr.content);
++    break;
++
++  case QType::SOA:
++    stringtok(soaparts, rr.content);
++    if(soaparts.size() > 1) {
++      soaparts[0]=toCanonic(d_zonename, soaparts[0]);
++      soaparts[1]=toCanonic(d_zonename, soaparts[1]);
++    }
++    rr.content.clear();
++    for(string::size_type n = 0; n < soaparts.size(); ++n) {
++      if(n)
++	rr.content.append(1,' ');
++      rr.content+=soaparts[n];
++    }
++  default:;
++  }
++
++  rr.d_place=DNSResourceRecord::ANSWER;
++  return true;
++}
++
++bool ZoneParserTNG::getLine()
++{
++  char buffer[1024];
++  if(fgets(buffer, 1024, d_fp)) {
++    d_line=buffer;
++    return true;
++  }
++  return false;
++}
++
++
++#if 0
++int main(int argc, char** argv)
++try
++{
++  reportAllTypes();
++  ZoneParserTNG zpt(argv[1]);
++  DNSResourceRecord rr;
++  while(zpt.get(rr)) {
++  }
++  
++
++}
++catch(...)
++{}
++#endif
