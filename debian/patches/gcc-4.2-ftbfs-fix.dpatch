@@ -2,7 +2,7 @@
 ## gcc-4.2-ftbfs-fix.dpatch by Matthijs Mohlmann <matthijs@cacholong.nl>
 ##
 ## All lines beginning with `## DP:' are a description of the patch.
-## DP: No description.
+## DP: Avoid FTBFS when using GCC 4.2
 
 @DPATCH@
 diff -urNad trunk~/recursor_cache.cc trunk/recursor_cache.cc
