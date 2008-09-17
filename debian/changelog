@@ -1,6 +1,9 @@
 pdns-recursor (3.1.7-3) not-yet-uploaded; urgency=low
 
   * Fixed repository URL (SVN->Git)
+  * Increased policy version to 3.8.0 (lintian warning)
+  * Added proper description for gcc-4.2-ftbfs-fix.dpatch dpatch
+    (lintian warning)
 
  -- Christoph Haas <haas@debian.org>  Sun, 14 Sep 2008 22:48:59 +0200
 
