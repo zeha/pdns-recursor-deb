@@ -1,3 +1,9 @@
+pdns-recursor (3.1.4-1+etch3) stable; urgency=low
+
+  * Fixing multipart TXT support (Closes: #498218)
+
+ -- Christoph Haas <haas@debian.org>  Mon, 15 Sep 2008 14:23:51 +0200
+
 pdns-recursor (3.1.4-1+etch2) stable-security; urgency=high
   
   * Use the strong PRNG for UDP source port numbers, too.
