@@ -5,7 +5,7 @@ Standards-Version: 3.8.0
 Maintainer: Debian PowerDNS Maintainers <powerdns-debian@workaround.org>
 Uploaders: Christoph Haas <haas@debian.org>, Matthijs Mohlmann <matthijs@cacholong.nl>
 Build-Depends: debhelper (>= 5.0.0), dpatch (>= 2.0.0), dpkg-dev (> 1.10.17), libboost-dev, libboost-serialization-dev
-Vcs-Git: http://git.workaround.org/?p=pdns-recursor.git
+Vcs-Git: git://github.com/Signum/debian-pdns-recursor.git
 
 Package: pdns-recursor
 Architecture: alpha amd64 i386 ia64 m68k powerpc s390 kfreebsd-i386 kfreebsd-amd64
