@@ -1,3 +1,9 @@
+pdns-recursor (3.1.7-3.1) unstable; urgency=low
+
+  * Fix FTBFS bug (closes: #528164(
+
+ -- Christoph Haas <haas@debian.org>  Mon, 11 May 2009 22:24:44 +0200
+
 pdns-recursor (3.1.7-3) unstable; urgency=low
 
   * Fixed repository URL (SVN->Git)

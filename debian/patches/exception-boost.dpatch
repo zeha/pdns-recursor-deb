@@ -1,0 +1,19 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## exception-boost.dpatch by  <chaas@aldi.workaround.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: Fix FTBFS bug #528164
+
+@DPATCH@
+diff -urNad pdns-recursor~/lwres.cc pdns-recursor/lwres.cc
+--- pdns-recursor~/lwres.cc	2009-05-11 22:23:16.000000000 +0200
++++ pdns-recursor/lwres.cc	2009-05-11 22:23:43.000000000 +0200
+@@ -181,7 +181,7 @@
+     
+     return 1;
+   }
+-  catch(exception &mde) {
++  catch(std::exception &mde) {
+     if(::arg().mustDo("log-common-errors"))
+       L<<Logger::Notice<<"Unable to parse packet from remote server "<<ip.toString()<<": "<<mde.what()<<endl;
+   }
