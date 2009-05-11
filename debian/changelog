@@ -1,4 +1,4 @@
-pdns-recursor (3.1.7-3.1) unstable; urgency=low
+pdns-recursor (3.1.7-4) unstable; urgency=low
 
   * Fix FTBFS bug (closes: #528164(
 
