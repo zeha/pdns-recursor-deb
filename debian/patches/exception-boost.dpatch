@@ -104,33 +104,3 @@ diff -urNad pdns-recursor~/rcpgenerator.cc pdns-recursor/rcpgenerator.cc
  {
    cerr<<"Fatal: "<<e.what()<<endl;
  }
-diff -urNad pdns-recursor~/zoneparser-tng.cc pdns-recursor/zoneparser-tng.cc
---- pdns-recursor~/zoneparser-tng.cc	2008-09-17 23:37:32.000000000 +0200
-+++ pdns-recursor/zoneparser-tng.cc	2009-05-11 23:18:52.000000000 +0200
-@@ -261,7 +261,7 @@
-       goto retry;
-     }
-     else
--      throw exception("Can't parse zone line '"+d_line+"' on line "+lexical_cast<string>(d_filestates.top().d_lineno)+
-+      throw std::exception("Can't parse zone line '"+d_line+"' on line "+lexical_cast<string>(d_filestates.top().d_lineno)+
- 		      " of file '"+d_filestates.top().d_filename);
-     goto retry;
-   }
-@@ -283,7 +283,7 @@
-   d_prevqname=rr.qname;
- 
-   if(parts.empty()) 
--    throw exception("Line with too little parts");
-+    throw std::exception("Line with too little parts");
- 
-   string nextpart;
-   
-@@ -330,7 +330,7 @@
-     }
-   }
-   if(!haveQTYPE) 
--    throw exception("Malformed line '"+d_line+"'");
-+    throw std::exception("Malformed line '"+d_line+"'");
- 
-   rr.content=d_line.substr(range.first);
- 
