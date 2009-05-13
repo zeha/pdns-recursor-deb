@@ -1,6 +1,8 @@
 pdns-recursor (3.1.7-5) unstable; urgency=low
 
   * Fix FTBFS bug with GCC 4.4 (closes: #506003)
+  * Make pdns-recursor available on hppa and sparc (closes: #489925)
+    by adding libc6-dev in a recent version to debian/control
 
  -- Christoph Haas <haas@debian.org>  Wed, 13 May 2009 21:36:55 +0200
 
