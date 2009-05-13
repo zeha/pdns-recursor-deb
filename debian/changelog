@@ -1,6 +1,12 @@
+pdns-recursor (3.1.7-5) unstable; urgency=low
+
+  * Fix FTBFS bug with GCC 4.4 (closes: #506003)
+
+ -- Christoph Haas <haas@debian.org>  Wed, 13 May 2009 21:36:55 +0200
+
 pdns-recursor (3.1.7-4) unstable; urgency=low
 
-  * Fix FTBFS bug (closes: #528164(
+  * Fix FTBFS bug (closes: #528164)
 
  -- Christoph Haas <haas@debian.org>  Mon, 11 May 2009 22:24:44 +0200
 
