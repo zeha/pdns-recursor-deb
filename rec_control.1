@@ -1,11 +1,11 @@
 .\"     Title: rec_control
 .\"    Author: 
-.\" Generator: DocBook XSL Stylesheets v1.72.0 <http://docbook.sf.net/>
-.\"      Date: 03/16/2008
+.\" Generator: DocBook XSL Stylesheets v1.73.2 <http://docbook.sf.net/>
+.\"      Date: 07/30/2009
 .\"    Manual: 
 .\"    Source: 
 .\"
-.TH "REC_CONTROL" "1" "03/16/2008" "" ""
+.TH "REC_CONTROL" "1" "07/30/2009" "" ""
 .\" disable hyphenation
 .nh
 .\" disable justification (adjust text to left margin only)
@@ -13,12 +13,12 @@
 .SH "NAME"
 rec_control \- control pdns_recursor
 .SH "SYNOPSIS"
-\fIrec_control\fR [\-\-help] [\-\-socket\-dir] [\-\-socket\-pid] command ..
+\fIrec_control\fR [\-\-help] [\-\-socket\-dir] [\-\-socket\-pid] command \&.\&.
 .sp
 .SH "DESCRIPTION"
-rec_control(1) allows the operator to control a running instance of the pdns_recursor.
+rec_control(1) allows the operator to control a running instance of the pdns_recursor\&.
 .sp
-The commands that can be passed to the recursor are described on http://doc.powerdns.com/rec\-control.html
+The commands that can be passed to the recursor are described on http://doc\&.powerdns\&.com/rec\-control\&.html
 .sp
 .SH "EXAMPLES"
 To stop the recursor by hand, run:
@@ -57,17 +57,17 @@ When running in SMP mode, pid of pdns_recursor to control
 .PP
 dump\-cache filename
 .RS 4
-Dumps the entire cache to the filename mentioned. This file should not exist already, PowerDNS will refuse to overwrite it. While dumping, the recursor will not answer questions.
+Dumps the entire cache to the filename mentioned\&. This file should not exist already, PowerDNS will refuse to overwrite it\&. While dumping, the recursor will not answer questions\&.
 .RE
 .PP
 get statistic
 .RS 4
-Retrieve a statistic. For items that can be queried, see http://doc.powerdns.com/recursor\-stats.html
+Retrieve a statistic\&. For items that can be queried, see http://doc\&.powerdns\&.com/recursor\-stats\&.html
 .RE
 .PP
 ping
 .RS 4
-Check if server is alive.
+Check if server is alive\&.
 .RE
 .PP
 quit
@@ -77,36 +77,36 @@ Request shutdown of the recursor
 .PP
 reload\-zones
 .RS 4
-Reload authoritative and forward zones. Retains current configuration in case of errors.
+Reload authoritative and forward zones\&. Retains current configuration in case of errors\&.
 .RE
 .PP
 top\-remotes
 .RS 4
-Shows the top\-20 most active remote hosts. Statistics are over the last
+Shows the top\-20 most active remote hosts\&. Statistics are over the last
 \fIremotes\-ringbuffer\-entries\fR
-queries, which defaults to 0.
+queries, which defaults to 0\&.
 .RE
 .PP
 wipe\-cache domain0 [domain1]
 .RS 4
-Wipe entries from the cache. This is useful if, for example, an important server has a new IP address, but the TTL has not yet expired. Multiple domain names can be passed. Note that you must terminate a domain with a .! So to wipe powerdns.org, issue
-\fIrec_control wipe\-cache powerdns.org.\fR. Versions beyond 3.1 don't need the trailing dot. Consider not only wiping
-\fIwww.domain.com.\fR
+Wipe entries from the cache\&. This is useful if, for example, an important server has a new IP address, but the TTL has not yet expired\&. Multiple domain names can be passed\&. Note that you must terminate a domain with a \&.! So to wipe powerdns\&.org, issue
+\fIrec_control wipe\-cache powerdns\&.org\&.\fR\&. Versions beyond 3\&.1 don\'t need the trailing dot\&. Consider not only wiping
+\fIwww\&.domain\&.com\&.\fR
 but also
-\fIdomain.com.\fR, as the cached nameservers or target of CNAME may continue to be undesired.
+\fIdomain\&.com\&.\fR, as the cached nameservers or target of CNAME may continue to be undesired\&.
 .RE
 .SH "BUGS"
-None known. File new ones at http://wiki.powerdns.com.
+None known\&. File new ones at http://wiki\&.powerdns\&.com\&.
 .sp
 .SH "AUTHOR"
-Written by PowerDNS.COM BV, bert hubert, <bert.hubert@netherlabs.nl>
+Written by PowerDNS\&.COM BV, bert hubert, <bert\&.hubert@netherlabs\&.nl>
 .sp
 .SH "RESOURCES"
-Website: http://wiki.powerdns.com, http://www.powerdns.com
+Website: http://wiki\&.powerdns\&.com, http://www\&.powerdns\&.com
 .sp
 .SH "SEE ALSO"
 pdns_recursor(1)
 .sp
 .SH "COPYING"
-Copyright \(co 2006 PowerDNS.COM BV. Free use of this software is granted under the terms of the GNU General Public License (GPL) version 2.
+Copyright \(co 2006 PowerDNS\&.COM BV\&. Free use of this software is granted under the terms of the GNU General Public License (GPL) version 2\&.
 .sp
