@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2003 - 2008  PowerDNS.COM BV
+    Copyright (C) 2003 - 2009  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 
@@ -317,10 +317,11 @@ int asendto(const char *data, int len, int flags,
 
   for(; chain.first != chain.second; chain.first++) {
     if(chain.first->key.fd > -1) { // don't chain onto existing chained waiter!
+      /*
       cerr<<"Orig: "<<pident.domain<<", "<<pident.remote.toString()<<", id="<<id<<endl;
       cerr<<"Had hit: "<< chain.first->key.domain<<", "<<chain.first->key.remote.toString()<<", id="<<chain.first->key.id
 	  <<", count="<<chain.first->key.chain.size()<<", origfd: "<<chain.first->key.fd<<endl;
-      
+      */
       chain.first->key.chain.insert(id); // we can chain
       *fd=-1;                            // gets used in waitEvent / sendEvent later on
       return 1;
@@ -568,7 +569,7 @@ void startDoResolve(void *p)
       
       if(ret.size()) {
 	shuffle(ret);
-
+	
 	for(vector<DNSResourceRecord>::const_iterator i=ret.begin(); i!=ret.end(); ++i) {
 	  pw.startRecord(i->qname, i->qtype.getCode(), i->ttl, i->qclass, (DNSPacketWriter::Place)i->d_place); 
 	  
@@ -666,7 +667,7 @@ void startDoResolve(void *p)
   catch(MOADNSException& e) {
     L<<Logger::Error<<"DNS parser error: "<<dc->d_mdp.d_qname<<", "<<e.what()<<endl;
   }
-  catch(exception& e) {
+  catch(std::exception& e) {
     L<<Logger::Error<<"STL error: "<<e.what()<<endl;
   }
   catch(...) {
@@ -880,7 +881,7 @@ void handleNewUDPQuestion(int fd, FDMultiplexer::funcparam_t& var)
         try {
 	   questionExpand(data, len, qname, sizeof(qname), type);  
         }
-        catch(exception &e)
+        catch(std::exception &e)
         {
            throw MOADNSException(e.what());
         }
@@ -1183,7 +1184,7 @@ void handleRCC(int fd, FDMultiplexer::funcparam_t& var)
     s_rcc.send(answer, &remote);
     command();
   }
-  catch(exception& e) {
+  catch(std::exception& e) {
     L<<Logger::Error<<"Error dealing with control socket request: "<<e.what()<<endl;
   }
   catch(AhuException& ae) {
@@ -1245,15 +1246,13 @@ void handleTCPClientWritable(int fd, FDMultiplexer::funcparam_t& var)
 // resend event to everybody chained onto it
 void doResends(MT_t::waiters_t::iterator& iter, PacketID resend, const string& content)
 {
-
   if(iter->key.chain.empty())
     return;
-
-  cerr<<"doResends called!\n";
+  //  cerr<<"doResends called!\n";
   for(PacketID::chain_t::iterator i=iter->key.chain.begin(); i != iter->key.chain.end() ; ++i) {
     resend.fd=-1;
     resend.id=*i;
-    cerr<<"\tResending "<<content.size()<<" bytes for fd="<<resend.fd<<" and id="<<resend.id<<endl;
+    //    cerr<<"\tResending "<<content.size()<<" bytes for fd="<<resend.fd<<" and id="<<resend.id<<endl;
 
     MT->sendEvent(resend, &content);
     g_stats.chainResends++;
@@ -1471,7 +1470,7 @@ string reloadAuthAndForwards()
       L<<Logger::Warning<<"Unable to re-parse configuration file '"<<configname<<"'"<<endl;
     
     ::arg().preParseFile(configname.c_str(), "auth-zones");
-    ::arg().preParseFile(configname.c_str(), "export-etc-hosts");
+    ::arg().preParseFile(configname.c_str(), "export-etc-hosts", "off");
     ::arg().preParseFile(configname.c_str(), "serve-rfc1918");
     
     parseAuthAndForwards();
@@ -1486,7 +1485,7 @@ string reloadAuthAndForwards()
     SyncRes::s_negcache.clear(); 
     return "ok\n";
   }
-  catch(exception& e) {
+  catch(std::exception& e) {
     L<<Logger::Error<<"Had error reloading zones, keeping original data: "<<e.what()<<endl;
   }
   catch(AhuException& ae) {
@@ -1525,7 +1524,7 @@ void parseAuthAndForwards()
 	    string tmp=DNSRR2String(rr);
 	    rr=String2DNSRR(rr.qname, rr.qtype, tmp, rr.ttl);
 	  }
-	  catch(exception &e) {
+	  catch(std::exception &e) {
 	    throw AhuException("Error parsing record '"+rr.qname+"' of type "+rr.qtype.getName()+" in zone '"+headers.first+"' from file '"+headers.second+"': "+e.what());
 	  }
 	  catch(...) {
@@ -1647,7 +1646,7 @@ string doReloadLuaScript(vector<string>::const_iterator begin, vector<string>::c
       }
     }
   }
-  catch(exception& e) {
+  catch(std::exception& e) {
     L<<Logger::Error<<"Retaining current script, error from '"<<fname<<"': "<< e.what() <<endl;
     return string("Retaining current script, error from '"+fname+"': "+string(e.what())+"\n");
   }
@@ -1671,7 +1670,7 @@ int serviceMain(int argc, char*argv[])
       L<<Logger::Error<<"Unknown logging facility "<<::arg().asNum("logging-facility") <<endl;
   }
 
-  L<<Logger::Warning<<"PowerDNS recursor "<<VERSION<<" (C) 2001-2008 PowerDNS.COM BV ("<<__DATE__", "__TIME__;
+  L<<Logger::Warning<<"PowerDNS recursor "<<VERSION<<" (C) 2001-2009 PowerDNS.COM BV ("<<__DATE__", "__TIME__;
 #ifdef __GNUC__
   L<<", gcc "__VERSION__;
 #endif // add other compilers here
@@ -1771,7 +1770,7 @@ int serviceMain(int argc, char*argv[])
     }
     
   }
-  catch(exception &e) {
+  catch(std::exception &e) {
     L<<Logger::Error<<"Failed to load 'lua' script from '"<<::arg()["lua-dns-script"]<<"': "<<e.what()<<endl;
     exit(99);
   }
@@ -1986,6 +1985,7 @@ int main(int argc, char **argv)
     ::arg().set("logging-facility","Facility to log messages as. 0 corresponds to local0")="";
 #endif
     ::arg().set("config-dir","Location of configuration directory (recursor.conf)")=SYSCONFDIR;
+    
     ::arg().set("socket-dir","Where the controlsocket will live")=LOCALSTATEDIR;
     ::arg().set("delegation-only","Which domains we only accept delegations from")="";
     ::arg().set("query-local-address","Source IP address for sending queries")="0.0.0.0";
@@ -1993,11 +1993,11 @@ int main(int argc, char **argv)
     ::arg().set("client-tcp-timeout","Timeout in seconds when talking to TCP clients")="2";
     ::arg().set("max-tcp-clients","Maximum number of simultaneous TCP clients")="128";
     ::arg().set("hint-file", "If set, load root hints from this file")="";
-    ::arg().set("max-cache-entries", "If set, maximum number of entries in the main cache")="0";
+    ::arg().set("max-cache-entries", "If set, maximum number of entries in the main cache")="1000000";
     ::arg().set("max-negative-ttl", "maximum number of seconds to keep a negative cached entry in memory")="3600";
     ::arg().set("server-id", "Returned when queried for 'server.id' TXT, defaults to hostname")="";
     ::arg().set("remotes-ringbuffer-entries", "maximum number of packets to store statistics for")="0";
-    ::arg().set("version-string", "string reported on version.pdns or version.bind")="PowerDNS Recursor "VERSION" $Id: pdns_recursor.cc 1200 2008-06-14 21:11:33Z ahu $";
+    ::arg().set("version-string", "string reported on version.pdns or version.bind")="PowerDNS Recursor "VERSION" $Id: pdns_recursor.cc 1392 2009-07-31 19:44:06Z ahu $";
     ::arg().set("allow-from", "If set, only allow these comma separated netmasks to recurse")="127.0.0.0/8, 10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12, ::1/128, fe80::/10";
     ::arg().set("allow-from-file", "If set, load allowed netmasks from this file")="";
     ::arg().set("entropy-source", "If set, read entropy from this file")="/dev/urandom";
@@ -2060,7 +2060,7 @@ int main(int argc, char **argv)
     L<<Logger::Error<<"Exception: "<<ae.reason<<endl;
     ret=EXIT_FAILURE;
   }
-  catch(exception &e) {
+  catch(std::exception &e) {
     L<<Logger::Error<<"STL Exception: "<<e.what()<<endl;
     ret=EXIT_FAILURE;
   }

@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2002-2006  PowerDNS.COM BV
+    Copyright (C) 2002-2009  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
@@ -20,16 +20,8 @@
 #define MISC_HH
 #include <stdint.h>
 #include <cstring>
-
+#include <cstdio>
 #if 0
-#define RDTSC(qp) \
-do { \
-  unsigned long lowPart, highPart;					\
-  __asm__ __volatile__("cpuid"); \
-  __asm__ __volatile__("rdtsc" : "=a" (lowPart), "=d" (highPart)); \
-    qp = (((unsigned long long) highPart) << 32) | lowPart; \
-} while (0)
-
 #include <iostream>
 using std::cout;
 using std::endl;
