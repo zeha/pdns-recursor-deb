@@ -1,0 +1,22 @@
+Index: recursor_cache.cc
+===================================================================
+--- recursor_cache.cc.orig
++++ recursor_cache.cc
+@@ -11,7 +11,7 @@
+ 
+ #include "config.h"
+ 
+-#ifdef GCC_SKIP_LOCKING
++/*#ifdef GCC_SKIP_LOCKING
+ #include <bits/atomicity.h>
+ // This code is ugly but does speedup the recursor tremendously on multi-processor systems, and even has a large effect (20, 30%) on uniprocessor 
+ namespace __gnu_cxx
+@@ -32,7 +32,7 @@
+     *__mem+=__val;
+   }
+ }
+-#endif
++#endif*/
+ 
+ 
+ DNSResourceRecord String2DNSRR(const string& qname, const QType& qt, const string& serial, uint32_t ttd)

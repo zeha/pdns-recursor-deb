@@ -460,7 +460,7 @@ try
   cout<<"Regenerated: '"<<out<<"'\n";
   
 }
-catch(std::exception& e)
+catch(exception& e)
 {
   cerr<<"Fatal: "<<e.what()<<endl;
 }
