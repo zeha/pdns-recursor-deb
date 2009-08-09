@@ -1,8 +1,9 @@
 pdns-recursor (3.1.7.1-1) unstable; urgency=low
 
-  * New upstream release
+  * New upstream release (Closes: #497920)
   * Using new patch system quilt.
   * Updated Standards-Version to 3.8.2
+  * Enable lua scripting support (Closes: #534893)
 
  -- Matthijs Mohlmann <matthijs@cacholong.nl>  Sun, 09 Aug 2009 12:58:06 +0200
 

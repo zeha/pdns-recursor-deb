@@ -35,7 +35,7 @@ build: patch build-stamp
 build-stamp: configure
 	
 	# Add here commands to compile the arch part of the package.
-	$(MAKE) 
+	$(MAKE) LUA=1
 	
 	touch build-stamp
 
