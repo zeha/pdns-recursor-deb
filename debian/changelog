@@ -1,3 +1,9 @@
+pdns-recursor (3.1.7.1-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Sun, 09 Aug 2009 12:58:06 +0200
+
 pdns-recursor (3.1.7-5) unstable; urgency=low
 
   * Fix FTBFS bug with GCC 4.4 (closes: #506003)
