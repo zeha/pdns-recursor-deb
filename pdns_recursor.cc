@@ -667,7 +667,7 @@ void startDoResolve(void *p)
   catch(MOADNSException& e) {
     L<<Logger::Error<<"DNS parser error: "<<dc->d_mdp.d_qname<<", "<<e.what()<<endl;
   }
-  catch(exception& e) {
+  catch(std::exception& e) {
     L<<Logger::Error<<"STL error: "<<e.what()<<endl;
   }
   catch(...) {
@@ -881,7 +881,7 @@ void handleNewUDPQuestion(int fd, FDMultiplexer::funcparam_t& var)
         try {
 	   questionExpand(data, len, qname, sizeof(qname), type);  
         }
-        catch(exception &e)
+        catch(std::exception &e)
         {
            throw MOADNSException(e.what());
         }
@@ -1184,7 +1184,7 @@ void handleRCC(int fd, FDMultiplexer::funcparam_t& var)
     s_rcc.send(answer, &remote);
     command();
   }
-  catch(exception& e) {
+  catch(std::exception& e) {
     L<<Logger::Error<<"Error dealing with control socket request: "<<e.what()<<endl;
   }
   catch(AhuException& ae) {
@@ -1485,7 +1485,7 @@ string reloadAuthAndForwards()
     SyncRes::s_negcache.clear(); 
     return "ok\n";
   }
-  catch(exception& e) {
+  catch(std::exception& e) {
     L<<Logger::Error<<"Had error reloading zones, keeping original data: "<<e.what()<<endl;
   }
   catch(AhuException& ae) {
@@ -1524,7 +1524,7 @@ void parseAuthAndForwards()
 	    string tmp=DNSRR2String(rr);
 	    rr=String2DNSRR(rr.qname, rr.qtype, tmp, rr.ttl);
 	  }
-	  catch(exception &e) {
+	  catch(std::exception &e) {
 	    throw AhuException("Error parsing record '"+rr.qname+"' of type "+rr.qtype.getName()+" in zone '"+headers.first+"' from file '"+headers.second+"': "+e.what());
 	  }
 	  catch(...) {
@@ -1646,7 +1646,7 @@ string doReloadLuaScript(vector<string>::const_iterator begin, vector<string>::c
       }
     }
   }
-  catch(exception& e) {
+  catch(std::exception& e) {
     L<<Logger::Error<<"Retaining current script, error from '"<<fname<<"': "<< e.what() <<endl;
     return string("Retaining current script, error from '"+fname+"': "+string(e.what())+"\n");
   }
@@ -1770,7 +1770,7 @@ int serviceMain(int argc, char*argv[])
     }
     
   }
-  catch(exception &e) {
+  catch(std::exception &e) {
     L<<Logger::Error<<"Failed to load 'lua' script from '"<<::arg()["lua-dns-script"]<<"': "<<e.what()<<endl;
     exit(99);
   }
@@ -2060,7 +2060,7 @@ int main(int argc, char **argv)
     L<<Logger::Error<<"Exception: "<<ae.reason<<endl;
     ret=EXIT_FAILURE;
   }
-  catch(exception &e) {
+  catch(std::exception &e) {
     L<<Logger::Error<<"STL Exception: "<<e.what()<<endl;
     ret=EXIT_FAILURE;
   }
