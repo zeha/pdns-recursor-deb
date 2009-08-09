@@ -1,7 +1,7 @@
-Index: Makefile
+Index: b/Makefile
 ===================================================================
---- Makefile.orig
-+++ Makefile
+--- a/Makefile
++++ b/Makefile
 @@ -72,10 +72,10 @@
  install: all
  	-mkdir -p $(DESTDIR)/$(SBINDIR)

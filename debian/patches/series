@@ -1,4 +1,4 @@
-do-not-strip-binaries -p0
-gcc-4.2-ftbfs-fix -p0
-gcc-4.4-ftbfs-fix -p0
-exception-boost -p0
+do-not-strip-binaries 
+gcc-4.2-ftbfs-fix 
+gcc-4.4-ftbfs-fix 
+exception-boost 

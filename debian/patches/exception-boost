@@ -1,7 +1,7 @@
-Index: lwres.cc
+Index: b/lwres.cc
 ===================================================================
---- lwres.cc.orig
-+++ lwres.cc
+--- a/lwres.cc
++++ b/lwres.cc
 @@ -181,7 +181,7 @@
      
      return 1;
@@ -11,10 +11,10 @@ Index: lwres.cc
      if(::arg().mustDo("log-common-errors"))
        L<<Logger::Notice<<"Unable to parse packet from remote server "<<ip.toString()<<": "<<mde.what()<<endl;
    }
-Index: pdns_recursor.cc
+Index: b/pdns_recursor.cc
 ===================================================================
---- pdns_recursor.cc.orig
-+++ pdns_recursor.cc
+--- a/pdns_recursor.cc
++++ b/pdns_recursor.cc
 @@ -667,7 +667,7 @@
    catch(MOADNSException& e) {
      L<<Logger::Error<<"DNS parser error: "<<dc->d_mdp.d_qname<<", "<<e.what()<<endl;
@@ -87,10 +87,10 @@ Index: pdns_recursor.cc
      L<<Logger::Error<<"STL Exception: "<<e.what()<<endl;
      ret=EXIT_FAILURE;
    }
-Index: rcpgenerator.cc
+Index: b/rcpgenerator.cc
 ===================================================================
---- rcpgenerator.cc.orig
-+++ rcpgenerator.cc
+--- a/rcpgenerator.cc
++++ b/rcpgenerator.cc
 @@ -461,7 +461,7 @@
    cout<<"Regenerated: '"<<out<<"'\n";
    

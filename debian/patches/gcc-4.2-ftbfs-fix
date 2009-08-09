@@ -1,7 +1,7 @@
-Index: recursor_cache.cc
+Index: b/recursor_cache.cc
 ===================================================================
---- recursor_cache.cc.orig
-+++ recursor_cache.cc
+--- a/recursor_cache.cc
++++ b/recursor_cache.cc
 @@ -11,7 +11,7 @@
  
  #include "config.h"

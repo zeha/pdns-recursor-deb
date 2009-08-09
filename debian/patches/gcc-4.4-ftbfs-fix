@@ -1,7 +1,7 @@
-Index: dnsparser.cc
+Index: b/dnsparser.cc
 ===================================================================
---- dnsparser.cc.orig
-+++ dnsparser.cc
+--- a/dnsparser.cc
++++ b/dnsparser.cc
 @@ -20,6 +20,7 @@
  #include "dnswriter.hh"
  #include <boost/lexical_cast.hpp>
@@ -10,10 +10,10 @@ Index: dnsparser.cc
  
  using namespace boost;
  
-Index: rcpgenerator.cc
+Index: b/rcpgenerator.cc
 ===================================================================
---- rcpgenerator.cc.orig
-+++ rcpgenerator.cc
+--- a/rcpgenerator.cc
++++ b/rcpgenerator.cc
 @@ -20,6 +20,7 @@
  #include "dnsparser.hh"
  #include "misc.hh"
