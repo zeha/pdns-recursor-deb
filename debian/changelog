@@ -1,8 +1,10 @@
 pdns-recursor (3.1.7.1-2) unstable; urgency=low
 
   * Fixing FTBFS on several archs (Closes: #540867, #541689)
+  * Added hppa and sparc architectures. See #489925, leaving open because of
+    more unsupported architectures.
 
- -- Matthijs Mohlmann <matthijs@cacholong.nl>  Sun, 16 Aug 2009 15:14:21 +0200
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Sun, 16 Aug 2009 15:39:54 +0200
 
 pdns-recursor (3.1.7.1-1) unstable; urgency=low
 
