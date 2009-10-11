@@ -34,6 +34,16 @@ if [ -f /etc/init.d/pdns_recursor ]; then
   rm -f /etc/init.d/pdns_recursor
 fi
 
+# Those using dependency based boot sequencing with sysv-rc and
+# installing pdns-recursor version 3.1.7.1-2 or earlier would have wrong
+# runlevel symlinks.  Recover from this.
+if [ "$1" = "configure" ] && dpkg --compare-versions "$2" le "3.1.7.1-2" \
+	&& [ -f /etc/rc2.d/S[0-9][0-9]pdns-recursor ] && [ ! -f /etc/rc1.d/K[0-9][0-9]pdns-recursor ]
+then
+	update-rc.d -f pdns-recursor remove
+fi
+
+
 if [ -x "/etc/init.d/pdns-recursor" ]; then
   update-rc.d pdns-recursor defaults 19 85 >/dev/null
   if [ -x /usr/sbin/invoke-rc.d ]; then
