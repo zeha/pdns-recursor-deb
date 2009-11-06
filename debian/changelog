@@ -1,9 +1,9 @@
 pdns-recursor (3.1.7.1-4) unstable; urgency=low
 
-  * Add mips, mipsel and sh4 to the supported list of architectures, only arm
-    and armel are missing. See #369453 (Closes: #551153)
+  * Add mips, mipsel and sh4 to the supported list of architectures, only arm,
+    armel and armeb are missing. See #369453 (Closes: #551153)
 
- -- Matthijs Mohlmann <matthijs@cacholong.nl>  Fri, 06 Nov 2009 17:57:45 +0100
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Fri, 06 Nov 2009 18:09:29 +0100
 
 pdns-recursor (3.1.7.1-3) unstable; urgency=low
 
