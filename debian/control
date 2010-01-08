@@ -8,7 +8,7 @@ Build-Depends: debhelper (>= 5.0.0), quilt, dpkg-dev (>= 1.10.17), libboost-dev,
 Vcs-Git: git://github.com/Signum/debian-pdns-recursor.git
 
 Package: pdns-recursor
-Architecture: alpha amd64 hppa i386 ia64 m68k mips mipsel powerpc s390 sparc kfreebsd-i386 kfreebsd-amd64
+Architecture: alpha amd64 hppa i386 ia64 m68k mips mipsel powerpc s390 sh4 sparc kfreebsd-i386 kfreebsd-amd64
 Depends: ${shlibs:Depends}, ${misc:Depends}, lsb-base (>= 3.0-6), adduser
 Replaces: pdns
 Recommends: pdns-doc
