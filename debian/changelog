@@ -1,6 +1,7 @@
 pdns-recursor (3.1.7.2-1) unstable; urgency=high
 
   * New upstream version. (CVE-2009-4009 and CVE-2009-4010) (Closes: #564145)
+  * Make lintian happy.
 
  -- Matthijs Mohlmann <matthijs@cacholong.nl>  Fri, 08 Jan 2010 18:14:44 +0100
 
