@@ -1,3 +1,9 @@
+pdns-recursor (3.1.7.2-1) unstable; urgency=high
+
+  * New upstream version. (CVE-2009-4009 and CVE-2009-4010) (Closes: #564145)
+
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Fri, 08 Jan 2010 18:14:44 +0100
+
 pdns-recursor (3.1.7.1-4) unstable; urgency=low
 
   * Add mips, mipsel and sh4 to the supported list of architectures, only arm,
