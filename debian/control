@@ -4,12 +4,12 @@ Priority: extra
 Standards-Version: 3.8.3
 Maintainer: Debian PowerDNS Maintainers <powerdns-debian@workaround.org>
 Uploaders: Christoph Haas <haas@debian.org>, Matthijs Mohlmann <matthijs@cacholong.nl>
-Build-Depends: debhelper (>= 5.0.0), quilt, dpkg-dev (> 1.10.17), libboost-dev, libboost-serialization-dev, liblua5.1-0-dev
+Build-Depends: debhelper (>= 5.0.0), quilt, dpkg-dev (>= 1.10.17), libboost-dev, libboost-serialization-dev, liblua5.1-0-dev
 Vcs-Git: git://github.com/Signum/debian-pdns-recursor.git
 
 Package: pdns-recursor
 Architecture: alpha amd64 hppa i386 ia64 m68k mips mipsel powerpc s390 sparc kfreebsd-i386 kfreebsd-amd64
-Depends: ${shlibs:Depends}, lsb-base (>= 3.0-6), adduser
+Depends: ${shlibs:Depends}, ${misc:Depends}, lsb-base (>= 3.0-6), adduser
 Replaces: pdns
 Recommends: pdns-doc
 Description: PowerDNS recursor
