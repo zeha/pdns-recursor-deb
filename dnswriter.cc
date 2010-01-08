@@ -67,7 +67,7 @@ void DNSPacketWriter::startRecord(const string& name, uint16_t qtype, uint32_t t
   d_stuff = 0; 
   d_rollbackmarker=d_content.size();
 
-  if(!strcasecmp(d_qname.c_str(), d_recordqname.c_str())) {  // don't do the whole label compression thing if we *know* we can get away with "see question"
+  if(pdns_iequals(d_qname,d_recordqname)) {  // don't do the whole label compression thing if we *know* we can get away with "see question"
     static char marker[2]={0xc0, 0x0c};
     d_content.insert(d_content.end(), &marker[0], &marker[2]);
   }
@@ -153,14 +153,12 @@ DNSPacketWriter::lmap_t::iterator find(DNSPacketWriter::lmap_t& lmap, const stri
 {
   DNSPacketWriter::lmap_t::iterator ret;
   for(ret=lmap.begin(); ret != lmap.end(); ++ret)
-    if(!strcasecmp(ret->first.c_str() ,label.c_str()))
+    if(pdns_iequals(ret->first,label))
       break;
   return ret;
 }
 
-typedef vector<pair<string::size_type, string::size_type> > parts_t;
-
-bool labeltokUnescape(parts_t& parts, const string& label)
+bool labeltokUnescape(labelparts_t& parts, const string& label)
 {
   string::size_type epos = label.size(), lpos(0), pos;
   bool unescapedSomething = false;
@@ -188,7 +186,7 @@ bool labeltokUnescape(parts_t& parts, const string& label)
 // this is the absolute hottest function in the pdns recursor 
 void DNSPacketWriter::xfrLabel(const string& label, bool compress)
 {
-  parts_t parts;
+  labelparts_t parts;
 
   if(label.size()==1 && label[0]=='.') { // otherwise we encode '..'
     d_record.push_back(0);
@@ -200,7 +198,7 @@ void DNSPacketWriter::xfrLabel(const string& label, bool compress)
   // d_stuff is amount of stuff that is yet to be written out - the dnsrecordheader for example
   unsigned int pos=d_content.size() + d_record.size() + d_stuff; 
   string chopped;
-  for(parts_t::const_iterator i=parts.begin(); i!=parts.end(); ++i) {
+  for(labelparts_t::const_iterator i=parts.begin(); i!=parts.end(); ++i) {
     chopped.assign(label.c_str() + i->first);
     lmap_t::iterator li=d_labelmap.end();
     // see if we've written out this domain before
@@ -218,6 +216,10 @@ void DNSPacketWriter::xfrLabel(const string& label, bool compress)
     if(unescaped) {
       string part(label.c_str() + i -> first, i->second - i->first);
       replace_all(part, "\\.", ".");
+      replace_all(part, "\\\\", "\\");      
+      if(part.size() > 255)
+        throw MOADNSException("Attempting to express a label of invalid size in xfrLabel");
+        
       d_record.push_back(part.size());
       unsigned int len=d_record.size();
       d_record.resize(len + part.size());

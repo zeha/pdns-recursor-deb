@@ -19,7 +19,7 @@
 #ifndef QTYPE_HH
 #define QTYPE_HH
 /* (C) 2002 POWERDNS.COM BV */
-// $Id: qtype.hh 1207 2008-06-19 12:12:27Z ahu $
+// $Id$
 #include <string>
 #include <vector>
 #include <utility>

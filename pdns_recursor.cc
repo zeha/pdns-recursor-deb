@@ -807,43 +807,54 @@ void handleNewTCPQuestion(int fd, FDMultiplexer::funcparam_t& )
   }
 }
  
-void questionExpand(const char* packet, uint16_t len, char* qname, int maxlen, uint16_t& type)
+
+static void appendEscapedLabel(string& ret, const char* begin, unsigned char labellen)
 {
-  type=0;
-  const unsigned char* end=(const unsigned char*)packet+len;
-  unsigned char* lbegin=(unsigned char*)packet+12;
-  unsigned char* pos=lbegin;
-  unsigned char labellen;
-
-  // 3www4ds9a2nl0
-  char *dst=qname;
-  char* lend=dst + maxlen;
+  unsigned char n = 0;
+  for(n = 0 ; n < labellen; ++n)
+    if(begin[n] == '.' || begin[n] == '\\')
+      break;
   
-  if(!*pos)
-    *dst++='.';
-
-  while((labellen=*pos++) && pos < end) { // "scan and copy"
-    if(dst >= lend)
-      throw runtime_error("Label length exceeded destination length");
-    for(;labellen;--labellen)
-      *dst++ = *pos++;
-    *dst++='.';
+  if( n == labellen) {
+    ret.append(begin, labellen);
+    return;
   }
-  *dst=0;
-
-  if(pos + labellen + 2 <= end)  // is this correct XXX FIXME?
-    type=(*pos)*256 + *(pos+1);
-
-
-  //  cerr<<"Returning: '"<< string(tmp+1, pos) <<"'\n";
+  string label(begin, labellen);
+  boost::replace_all(label, "\\",  "\\\\");
+  boost::replace_all(label, ".",  "\\.");
+  ret.append(label);
 }
 
 string questionExpand(const char* packet, uint16_t len, uint16_t& type)
 {
-  char tmp[512];
-  questionExpand(packet, len, tmp, sizeof(tmp), type);
-  return tmp;
+  type=0;
+  string ret;
+  if(len < 12) 
+    throw runtime_error("Error parsing question in incoming packet: packet too short");
+    
+  const unsigned char* end = (const unsigned char*)packet+len;
+  const unsigned char* pos = (const unsigned char*)packet+12;
+  unsigned char labellen;
+  
+  if(!*pos)
+    ret.assign(1, '.');
+  
+  while((labellen=*pos++) && pos < end) { // "scan and copy"
+    if(pos + labellen > end)
+      throw runtime_error("Error parsing question in incoming packet: label extends beyond packet");
+    
+    appendEscapedLabel(ret, (const char*) pos, labellen);
+    
+    ret.append(1, '.');
+    pos += labellen;
+  }
+
+  if(pos + labellen + 2 <= end)  
+    type=(*pos)*256 + *(pos+1);
+  // cerr << "returning: '"<<ret<<"'"<<endl;
+  return ret;
 }
+
 
 void handleNewUDPQuestion(int fd, FDMultiplexer::funcparam_t& var)
 {
@@ -875,59 +886,6 @@ void handleNewUDPQuestion(int fd, FDMultiplexer::funcparam_t& var)
       }
       else {
 	++g_stats.qcounter;
-#if 0
-	uint16_t type;
-	char qname[256];
-        try {
-	   questionExpand(data, len, qname, sizeof(qname), type);  
-        }
-        catch(std::exception &e)
-        {
-           throw MOADNSException(e.what());
-        }
-	
-	// must all be same length answers right now!
-	if((type==QType::A || type==QType::AAAA) && dh->arcount==0 && dh->ancount==0 && dh->nscount ==0 && ntohs(dh->qdcount)==1 ) {
-	  char *record[10];
-	  uint16_t rlen[10];
-	  uint32_t ttd[10];
-	  int count;
-	  if((count=RC.getDirect(g_now.tv_sec, qname, QType(type), ttd, record, rlen))) { 
-	    if(len + count*(sizeof(dnsrecordheader) + 2 + rlen[0]) > 512)
-	      goto slow;
-
-	    random_shuffle(record, &record[count]);
-	    dh->qr=1;
-	    dh->ra=1;
-	    dh->ancount=ntohs(count);
-	    for(int n=0; n < count ; ++n) {
-	      memcpy(data+len, "\xc0\x0c", 2); // answer label pointer
-	      len+=2;
-	      struct dnsrecordheader drh;
-	      drh.d_type=htons(type);
-	      drh.d_class=htons(1);
-	      drh.d_ttl=htonl(ttd[n] - g_now.tv_sec);
-	      drh.d_clen=htons(rlen[n]);
-	      memcpy(data+len, &drh, sizeof(drh));
-	      len+=sizeof(drh);
-	      memcpy(data+len, record[n], rlen[n]);
-	      len+=rlen[n];
-	    }
-	    RDTSC(tsc2);      	    
-	    g_stats.shunted++;
-	    sendto(fd, data, len, 0, (struct sockaddr *)(&fromaddr), fromaddr.getSocklen());
-//	    cerr<<"shunted: " << (tsc2-tsc1) / 3000.0 << endl;
-	    return;
-	  }
-	}
-	else {
-	  if(type!=QType::A && type!=QType::AAAA)
-    	    g_stats.noShuntWrongType++;
-          else
-            g_stats.noShuntWrongQuestion++;
-        }
-      slow:
-#endif
 	DNSComboWriter* dc = new DNSComboWriter(data, len, g_now);
 	dc->setSocket(fd);
 	dc->setRemote(&fromaddr);
@@ -1303,7 +1261,13 @@ void handleUDPServerResponse(int fd, FDMultiplexer::funcparam_t& var)
     pident.remote=fromaddr;
     pident.id=dh.id;
     pident.fd=fd;
-    pident.domain=questionExpand(data, len, pident.type); // don't copy this from above - we need to do the actual read
+    try {
+      pident.domain=questionExpand(data, len, pident.type); // don't copy this from above - we need to do the actual read
+    }
+    catch(...) {
+      return;
+    }
+    
     string packet;
     packet.assign(data, len);
 
@@ -1321,7 +1285,7 @@ void handleUDPServerResponse(int fd, FDMultiplexer::funcparam_t& var)
       
       for(MT_t::waiters_t::iterator mthread=MT->d_waiters.begin(); mthread!=MT->d_waiters.end(); ++mthread) {
 	if(pident.fd==mthread->key.fd && mthread->key.remote==pident.remote &&  mthread->key.type == pident.type &&
-	   !Utility::strcasecmp(pident.domain.c_str(), mthread->key.domain.c_str())) {
+	   pdns_iequals(pident.domain,mthread->key.domain)) {
 	  mthread->key.nearMisses++;
 	}
       }
@@ -1670,7 +1634,7 @@ int serviceMain(int argc, char*argv[])
       L<<Logger::Error<<"Unknown logging facility "<<::arg().asNum("logging-facility") <<endl;
   }
 
-  L<<Logger::Warning<<"PowerDNS recursor "<<VERSION<<" (C) 2001-2009 PowerDNS.COM BV ("<<__DATE__", "__TIME__;
+  L<<Logger::Warning<<"PowerDNS recursor "<<VERSION<<" (C) 2001-2010 PowerDNS.COM BV ("<<__DATE__", "__TIME__;
 #ifdef __GNUC__
   L<<", gcc "__VERSION__;
 #endif // add other compilers here
@@ -1997,7 +1961,7 @@ int main(int argc, char **argv)
     ::arg().set("max-negative-ttl", "maximum number of seconds to keep a negative cached entry in memory")="3600";
     ::arg().set("server-id", "Returned when queried for 'server.id' TXT, defaults to hostname")="";
     ::arg().set("remotes-ringbuffer-entries", "maximum number of packets to store statistics for")="0";
-    ::arg().set("version-string", "string reported on version.pdns or version.bind")="PowerDNS Recursor "VERSION" $Id: pdns_recursor.cc 1392 2009-07-31 19:44:06Z ahu $";
+    ::arg().set("version-string", "string reported on version.pdns or version.bind")="PowerDNS Recursor "VERSION" $Id$";
     ::arg().set("allow-from", "If set, only allow these comma separated netmasks to recurse")="127.0.0.0/8, 10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12, ::1/128, fe80::/10";
     ::arg().set("allow-from-file", "If set, load allowed netmasks from this file")="";
     ::arg().set("entropy-source", "If set, read entropy from this file")="/dev/urandom";

@@ -194,7 +194,7 @@ public:
   static uint16_t TypeToNumber(const string& name)
   {
     for(namemap_t::const_iterator i=getNamemap().begin(); i!=getNamemap().end();++i)
-      if(!Utility::strcasecmp(i->second.c_str(), name.c_str()))
+      if(pdns_iequals(i->second,name))
 	return i->first.second;
 
     throw runtime_error("Unknown DNS type '"+name+"'");

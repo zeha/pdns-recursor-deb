@@ -74,19 +74,37 @@ private:
   vector<uint8_t> d_record;
 };
 
-static const string EncodeDNSLabel(const string& input)  
+static const string EncodeDNSLabel(const string& input) 
 {  
-  typedef vector<string> parts_t;  
-  parts_t parts;  
-  stringtok(parts,input,".");   	  	 
-  string ret;  
-  for(parts_t::const_iterator i=parts.begin(); i!=parts.end(); ++i) {  
-    ret.append(1,(char)i->length());  
-    ret.append(*i);  
-  }  
-  ret.append(1,(char)0);  
-  return ret;  
+  if(input.length() == 1 && input[0]=='.') // otherwise we encode .. (long story)
+    return string (1, 0); 
+    
+  labelparts_t parts;
+  bool unescapedSomething = labeltokUnescape(parts, input);
+  string ret;
+  
+  if(!unescapedSomething) {
+    for(labelparts_t::const_iterator i=parts.begin(); i!=parts.end(); ++i) {
+      ret.append(1, i->second - i->first);
+      ret.append(input.c_str() + i->first, i->second - i->first);
+    }
+
+  } else {
+    for(labelparts_t::const_iterator i=parts.begin(); i!=parts.end(); ++i) {
+      string part(input.c_str() + i->first, i->second - i->first);
+      boost::replace_all(part, "\\\\", "\\"); 
+      boost::replace_all(part, "\\.", ".");   
+    
+      ret.append(1, part.length());
+      ret.append(part);
+    }  
+  }    
+  ret.append(1, 0);
+  // cerr<<"Asked to encode '"<<input<<"', returning: '"<<makeHexDump(ret)<<endl;
+  // cerr<<"parts length: "<<parts.size()<<endl;
+  return ret;
 }  
+
 
 shared_ptr<DNSRecordContent> DNSRecordContent::unserialize(const string& qname, uint16_t qtype, const string& serialized)
 {
@@ -436,7 +454,7 @@ void PacketReader::getLabelFromContent(const vector<uint8_t>& content, uint16_t&
       // XXX FIXME THIS MIGHT BE VERY SLOW!
       ret.reserve(ret.size() + labellen + 2);
       for(string::size_type n = 0 ; n < labellen; ++n, frompos++) {
-	if(content.at(frompos)=='.')
+	if(content.at(frompos)=='.' || content.at(frompos)=='\\')
 	  ret.append(1, '\\');
 	ret.append(1, content[frompos]);
       }

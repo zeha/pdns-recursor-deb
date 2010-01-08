@@ -107,4 +107,8 @@ private:
   uint16_t d_rollbackmarker; // start of last complete packet, for rollback
   Place d_recordplace;
 };
+
+typedef vector<pair<std::string::size_type, std::string::size_type> > labelparts_t;
+
+bool labeltokUnescape(labelparts_t& parts, const std::string& label);
 #endif
