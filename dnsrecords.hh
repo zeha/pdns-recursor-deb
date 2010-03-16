@@ -26,7 +26,7 @@
 #include <set>
 
 using namespace std;
-using namespace boost;
+#include "namespaces.hh"
 
 #define includeboilerplate(RNAME)   RNAME##RecordContent(const DNSRecord& dr, PacketReader& pr); \
   RNAME##RecordContent(const string& zoneData);                                                  \
@@ -54,6 +54,7 @@ private:
 class ARecordContent : public DNSRecordContent
 {
 public:
+  explicit ARecordContent(uint32_t ip);
   includeboilerplate(A);
   void doRecordCheck(const DNSRecord& dr);
   uint32_t getIP() const;
@@ -124,6 +125,7 @@ class TSIGRecordContent : public DNSRecordContent
 {
 public:
   includeboilerplate(TSIG)
+  TSIGRecordContent() : DNSRecordContent(QType::TSIG) {}
 
   string d_algoName;
   uint64_t d_time; // 48 bits
@@ -197,7 +199,7 @@ class OPTRecordContent : public DNSRecordContent
 {
 public:
   includeboilerplate(OPT)
-
+  void getData(vector<pair<uint16_t, string> > &opts);
 private:
   string d_data;
 };
@@ -321,11 +323,18 @@ public:
   includeboilerplate(SOA)
   SOARecordContent(const string& mname, const string& rname, const struct soatimes& st);
 
-private:
   string d_mname;
   string d_rname;
   struct soatimes d_st;
 };
+
+class HIPRecordContent : public DNSRecordContent
+{
+public:
+  includeboilerplate(HIP)
+  HIPRecordContent(uint8_t algorithm, const string& hit, const string& key);
+};
+
 
 class NSECRecordContent : public DNSRecordContent
 {
@@ -362,6 +371,23 @@ public:
   
 private:
 };
+
+class URLRecordContent : public DNSRecordContent // Fake, 'fancy record' with type 256
+{
+public:
+  includeboilerplate(URL)
+private:
+  string d_url;
+};
+
+class MBOXFWRecordContent : public DNSRecordContent // Fake, 'fancy record' with type 256
+{
+public:
+  includeboilerplate(MBOXFW)
+private:
+  string d_mboxfw;
+};
+
 
 #define boilerplate(RNAME, RTYPE)                                                                         \
 RNAME##RecordContent::DNSRecordContent* RNAME##RecordContent::make(const DNSRecord& dr, PacketReader& pr) \
@@ -402,7 +428,7 @@ RNAME##RecordContent::RNAME##RecordContent(const string& zoneData) : DNSRecordCo
   }                                                                                                \
   catch(RecordTextException& rtr) {                                                                \
     throw MOADNSException("Parsing record content: "+string(rtr.what()));                          \
-  }												   \
+  }        											   \
 }                                                                                                  \
                                                                                                    \
 string RNAME##RecordContent::getZoneRepresentation() const                                         \
@@ -422,8 +448,22 @@ void RNAME##RecordContent::xfrPacket(Convertor& conv)             \
   CONV;                                                           \
 }                                                                 \
 
+struct EDNSOpts
+{
+  uint16_t d_packetsize;
+  uint8_t d_extRCode, d_version;
+  uint16_t d_Z;
+  vector<pair<uint16_t, string> > d_options;
+  enum zFlags { DNSSECOK=32768 };
+};
+//! Convenience function that fills out EDNS0 options, and returns true if there are any
+
+class MOADNSParser;
+bool getEDNSOpts(const MOADNSParser& mdp, EDNSOpts* eo);
+
 void reportBasicTypes();
 void reportOtherTypes();
 void reportAllTypes();
+void reportFancyTypes();
 
 #endif 

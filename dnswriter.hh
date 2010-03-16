@@ -5,7 +5,7 @@
 #include <vector>
 #include <map>
 #if !defined SOLARIS8 && !defined WIN32
-#include <stdint.h>
+
 #elif defined WIN32
 #include "utility.hh"
 #endif
@@ -38,7 +38,7 @@ using namespace std;
 
 */
 
-class DNSPacketWriter
+class DNSPacketWriter : public boost::noncopyable
 {
 
 public:
@@ -53,7 +53,8 @@ public:
   void startRecord(const string& name, uint16_t qtype, uint32_t ttl=3600, uint16_t qclass=1, Place place=ANSWER);
 
   /** Shorthand way to add an Opt-record, for example for EDNS0 purposes */
-  void addOpt(int udpsize, int extRCode, int Z);
+  typedef vector<pair<uint16_t,std::string> > optvect_t;
+  void addOpt(int udpsize, int extRCode, int Z, const optvect_t& options=optvect_t());
 
   /** needs to be called after the last record is added, but can be called again and again later on. Is called internally by startRecord too.
       The content of the vector<> passed to the constructor is inconsistent until commit is called.
@@ -92,9 +93,15 @@ public:
   
   dnsheader* getHeader();
   void getRecords(string& records);
+  const vector<uint8_t>& getRecordBeingWritten() { return d_record; }
+
+  void setCanonic(bool val) 
+  {
+    d_canonic=val;
+  }
 
 private:
-  vector<uint8_t>& d_content;
+  vector <uint8_t>& d_content;
   vector <uint8_t> d_record;
   string d_qname;
   uint16_t d_qtype, d_qclass;
@@ -106,9 +113,9 @@ private:
   uint16_t d_sor;
   uint16_t d_rollbackmarker; // start of last complete packet, for rollback
   Place d_recordplace;
+  bool d_canonic;
 };
 
-typedef vector<pair<std::string::size_type, std::string::size_type> > labelparts_t;
-
-bool labeltokUnescape(labelparts_t& parts, const std::string& label);
+typedef vector<pair<string::size_type, string::size_type> > labelparts_t;
+bool labeltokUnescape(labelparts_t& parts, const string& label);
 #endif
