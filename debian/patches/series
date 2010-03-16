@@ -1,3 +1,1 @@
-do-not-strip-binaries 
-gcc-4.2-ftbfs-fix 
-gcc-4.4-ftbfs-fix 
+do-not-strip-binaries

@@ -1,3 +1,10 @@
+pdns-recursor (3.2-1) unstable; urgency=low
+
+  * New upstream version.
+  * Update Standards-Version to 3.8.4
+
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Tue, 16 Mar 2010 16:32:07 +0100
+
 pdns-recursor (3.1.7.2-1) unstable; urgency=high
 
   * New upstream version. (CVE-2009-4009 and CVE-2009-4010) (Closes: #564145)
