@@ -9,12 +9,12 @@ PowerDNSLua::PowerDNSLua(const std::string& fname)
   throw runtime_error("Lua support disabled");
 }
 
-bool PowerDNSLua::nxdomain(const ComboAddress& remote, const string& query, const QType& qtype, vector<DNSResourceRecord>& ret, int& res)
+bool PowerDNSLua::nxdomain(const ComboAddress& remote,const ComboAddress& local, const string& query, const QType& qtype, vector<DNSResourceRecord>& ret, int& res)
 {
   return false;
 }
 
-bool PowerDNSLua::preresolve(const ComboAddress& remote, const string& query, const QType& qtype, vector<DNSResourceRecord>& ret, int& res)
+bool PowerDNSLua::preresolve(const ComboAddress& remote, const ComboAddress& local, const string& query, const QType& qtype, vector<DNSResourceRecord>& ret, int& res)
 {
   return false;
 }
@@ -39,7 +39,7 @@ extern "C" {
 #include <string>
 #include <vector>
 #include <stdexcept>
-
+#include "logger.hh"
 using namespace std;
 
 bool netmaskMatchTable(lua_State* lua, const std::string& ip)
@@ -57,7 +57,9 @@ bool netmaskMatchTable(lua_State* lua, const std::string& ip)
   return false;
 }
 
-extern "C" int netmaskMatchLua(lua_State *lua)
+extern "C" {
+
+int netmaskMatchLua(lua_State *lua)
 {
   bool result=false;
   if(lua_gettop(lua) >= 2) {
@@ -67,19 +69,38 @@ extern "C" int netmaskMatchLua(lua_State *lua)
     }
     else {
       for(int n=2 ; n <= lua_gettop(lua); ++n) { 
-	string netmask=lua_tostring(lua, n);
-	Netmask nm(netmask);
-	ComboAddress ca(ip);
-	
-	result = nm.match(ip);
-	if(result)
-	  break;
+        string netmask=lua_tostring(lua, n);
+        Netmask nm(netmask);
+        ComboAddress ca(ip);
+        
+        result = nm.match(ip);
+        if(result)
+          break;
       }
     }
   }
   
   lua_pushboolean(lua, result);
   return 1;
+}
+
+int getLocalAddressLua(lua_State* lua)
+{
+  lua_getfield(lua, LUA_REGISTRYINDEX, "__PowerDNSLua"); 
+  PowerDNSLua* pl = (PowerDNSLua*)lua_touserdata(lua, -1);
+  
+  lua_pushstring(lua, pl->getLocal().toString().c_str());
+  return 1;
+}
+
+int logLua(lua_State *lua)
+{
+  if(lua_gettop(lua) >= 1) {
+    string message=lua_tostring(lua, 1);
+    theL()<<Logger::Error<<"From Lua script: "<<message<<endl;
+  }
+  return 0;
+}
 }
 
 PowerDNSLua::PowerDNSLua(const std::string& fname)
@@ -101,6 +122,13 @@ PowerDNSLua::PowerDNSLua(const std::string& fname)
   
   lua_pushcfunction(d_lua, netmaskMatchLua);
   lua_setglobal(d_lua, "matchnetmask");
+
+  lua_pushcfunction(d_lua, logLua);
+  lua_setglobal(d_lua, "pdnslog");
+
+  lua_pushcfunction(d_lua, getLocalAddressLua);
+  lua_setglobal(d_lua, "getlocaladdress");
+
   lua_newtable(d_lua);
 
   for(vector<QType::namenum>::const_iterator iter = QType::names.begin(); iter != QType::names.end(); ++iter) {
@@ -110,17 +138,19 @@ PowerDNSLua::PowerDNSLua(const std::string& fname)
   lua_pushnumber(d_lua, 3);
   lua_setfield(d_lua, -2, "NXDOMAIN");
   lua_setglobal(d_lua, "pdns");
-
+  
+  lua_pushlightuserdata(d_lua, (void*)this); 
+  lua_setfield(d_lua, LUA_REGISTRYINDEX, "__PowerDNSLua");
 }
 
-bool PowerDNSLua::nxdomain(const ComboAddress& remote, const string& query, const QType& qtype, vector<DNSResourceRecord>& ret, int& res)
+bool PowerDNSLua::nxdomain(const ComboAddress& remote, const ComboAddress& local,const string& query, const QType& qtype, vector<DNSResourceRecord>& ret, int& res)
 {
-  return passthrough("nxdomain", remote, query, qtype, ret, res);
+  return passthrough("nxdomain", remote, local, query, qtype, ret, res);
 }
 
-bool PowerDNSLua::preresolve(const ComboAddress& remote, const string& query, const QType& qtype, vector<DNSResourceRecord>& ret, int& res)
+bool PowerDNSLua::preresolve(const ComboAddress& remote, const ComboAddress& local,const string& query, const QType& qtype, vector<DNSResourceRecord>& ret, int& res)
 {
-  return passthrough("preresolve", remote, query, qtype, ret, res);
+  return passthrough("preresolve", remote, local, query, qtype, ret, res);
 }
 
 bool PowerDNSLua::getFromTable(const std::string& key, std::string& value)
@@ -153,7 +183,7 @@ bool PowerDNSLua::getFromTable(const std::string& key, uint32_t& value)
 }
 
 
-bool PowerDNSLua::passthrough(const string& func, const ComboAddress& remote, const string& query, const QType& qtype, vector<DNSResourceRecord>& ret, int& res)
+bool PowerDNSLua::passthrough(const string& func, const ComboAddress& remote, const ComboAddress& local, const string& query, const QType& qtype, vector<DNSResourceRecord>& ret, int& res)
 {
   lua_getglobal(d_lua,  func.c_str());
   if(!lua_isfunction(d_lua, -1)) {
@@ -161,13 +191,15 @@ bool PowerDNSLua::passthrough(const string& func, const ComboAddress& remote, co
     lua_pop(d_lua, 1);
     return false;
   }
+  
+  d_local = local;
   /* the first argument */
   lua_pushstring(d_lua,  remote.toString().c_str() );
   lua_pushstring(d_lua,  query.c_str() );
   lua_pushnumber(d_lua,  qtype.getCode() );
 
   if(lua_pcall(d_lua,  3, 2, 0)) { // error 
-    string error=string("lua error: ")+lua_tostring(d_lua, -1);
+    string error=string("lua error in '"+func+"': ")+lua_tostring(d_lua, -1);
     lua_pop(d_lua, 1);
     throw runtime_error(error);
     return false;
@@ -201,7 +233,7 @@ bool PowerDNSLua::passthrough(const string& func, const ComboAddress& remote, co
     lua_pushnumber(d_lua, n);
     lua_gettable(d_lua, 2);
 
-    uint32_t tmpnum=0; // silly gcc warning
+    uint32_t tmpnum=0;
     if(!getFromTable("qtype", tmpnum)) 
       rr.qtype=QType::A;
     else

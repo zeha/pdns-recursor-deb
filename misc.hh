@@ -18,9 +18,10 @@
 */
 #ifndef MISC_HH
 #define MISC_HH
-#include <stdint.h>
+#include <inttypes.h>
 #include <cstring>
 #include <cstdio>
+#include <boost/algorithm/string.hpp>
 #if 0
 #include <iostream>
 using std::cout;
@@ -169,6 +170,10 @@ vstringtok (Container &container, string const &in,
   }
 }
 
+int writen2(int fd, const void *buf, size_t count);
+inline int writen2(int fd, const std::string &s) { return writen2(fd, s.data(), s.size()); }
+
+
 const string toLower(const string &upper);
 const string toLowerCanonic(const string &upper);
 bool IpToU32(const string &str, uint32_t *ip);
@@ -255,7 +260,7 @@ inline const string toLowerCanonic(const string &upper)
     for(i = 0; i < limit ; i++) {
       c = dns_tolower(upper[i]);
       if(c != upper[i])
-	reply[i] = c;
+        reply[i] = c;
     }   
     if(upper[i-1]=='.')
       reply.resize(i-1);
@@ -269,11 +274,11 @@ inline const string toLowerCanonic(const string &upper)
 // Make s uppercase:
 inline string toUpper( const string& s )
 {
-	string r(s);
-	for( unsigned int i = 0; i < s.length(); i++ ) {
-		r[i] = toupper( r[i] );
-	}
-	return r;
+        string r(s);
+        for( unsigned int i = 0; i < s.length(); i++ ) {
+        	r[i] = toupper( r[i] );
+        }
+        return r;
 }
 
 inline double getTime()
@@ -282,17 +287,6 @@ inline double getTime()
   Utility::gettimeofday(&now,0);
   
   return now.tv_sec+now.tv_usec/1000000.0;
-}
-
-
-inline void chomp( string& line, const string& delim )
-{
-	string::size_type pos;
-
-	if( ( pos = line.find_last_not_of( delim ) ) != string::npos )
-	{
-		line.resize( pos + 1 );
-	}
 }
 
 inline void unixDie(const string &why)
@@ -311,11 +305,16 @@ inline float makeFloat(const struct timeval& tv)
   return tv.tv_sec + tv.tv_usec/1000000.0f;
 }
 
+inline bool operator<(const struct timeval& lhs, const struct timeval& rhs) 
+{
+  return make_pair(lhs.tv_sec, lhs.tv_usec) < make_pair(rhs.tv_sec, rhs.tv_usec);
+}
+
 inline bool pdns_ilexicographical_compare(const std::string& a, const std::string& b)  __attribute__((pure));
 inline bool pdns_ilexicographical_compare(const std::string& a, const std::string& b) 
 {
   string::size_type aLen = a.length(), bLen = b.length(), n;
-  const char *aPtr = a.c_str(), *bPtr = b.c_str();
+  const unsigned char *aPtr = (const unsigned char*)a.c_str(), *bPtr = (const unsigned char*)b.c_str();
   int result;
   
   for(n = 0 ; n < aLen && n < bLen ; ++n) {
@@ -344,6 +343,7 @@ inline bool pdns_iequals(const std::string& a, const std::string& b)
   return aLen == bLen; // strings are equal (in length)
 }
 
+
 struct CIStringCompare: public binary_function<string, string, bool>  
 {
   bool operator()(const string& a, const string& b) const
@@ -367,10 +367,17 @@ inline string toCanonic(const string& zone, const string& domain)
     return domain;
   string ret=domain;
   ret.append(1,'.');
-  ret.append(zone);
+  if(!zone.empty() && zone[0]!='.')
+    ret.append(zone);
   return ret;
 }
 
-string stripDot(const string& dom);
+inline void setSocketReusable(int fd)
+{
+  int tmp=1;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char*)&tmp, static_cast<unsigned>(sizeof tmp));
+}
 
+string stripDot(const string& dom);
+void seedRandom(const string& source);
 #endif

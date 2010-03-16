@@ -48,7 +48,7 @@
 */
     
 using namespace std;
-using namespace boost;
+#include "namespaces.hh"
 
 class MOADNSException : public runtime_error
 {
@@ -81,6 +81,7 @@ public:
   void xfrIP(uint32_t& val)
   {
     xfr32BitInt(val);
+    val=htonl(val);
   }
 
   void xfrTime(uint32_t& val)
@@ -149,7 +150,7 @@ public:
   virtual std::string getZoneRepresentation() const = 0;
   virtual ~DNSRecordContent() {}
   virtual void toPacket(DNSPacketWriter& pw)=0;
-  virtual string serialize(const string& qname)
+  virtual string serialize(const string& qname) // it would rock if this were const, but it is too hard
   {
     vector<uint8_t> packet;
     string empty;
@@ -194,18 +195,18 @@ public:
   static uint16_t TypeToNumber(const string& name)
   {
     for(namemap_t::const_iterator i=getNamemap().begin(); i!=getNamemap().end();++i)
-      if(pdns_iequals(i->second,name))
-	return i->first.second;
+      if(pdns_iequals(i->second, name))
+        return i->first.second;
 
     throw runtime_error("Unknown DNS type '"+name+"'");
   }
 
-  static const string NumberToType(uint16_t num)
+  static const string NumberToType(uint16_t num, uint16_t classnum=1)
   {
-    if(!getNamemap().count(make_pair(1,num)))
+    if(!getNamemap().count(make_pair(classnum,num)))
       return "#" + lexical_cast<string>(num);
       //      throw runtime_error("Unknown DNS type with numerical id "+lexical_cast<string>(num));
-    return getNamemap()[make_pair(1,num)];
+    return getNamemap()[make_pair(classnum,num)];
   }
 
   explicit DNSRecordContent(uint16_t type) : d_qtype(type)
@@ -266,17 +267,17 @@ struct DNSRecord
 };
 
 //! This class can be used to parse incoming packets, and is copyable
-class MOADNSParser
+class MOADNSParser : public boost::noncopyable
 {
 public:
   //! Parse from a string
-  MOADNSParser(const string& buffer) 
+  MOADNSParser(const string& buffer)  : d_tsigPos(0)
   {
     init(buffer.c_str(), (unsigned int)buffer.size());
   }
 
   //! Parse from a pointer and length
-  MOADNSParser(const char *packet, unsigned int len)
+  MOADNSParser(const char *packet, unsigned int len) : d_tsigPos(0)
   {
     init(packet, len);
   }
@@ -298,20 +299,15 @@ public:
     return pr;
   }
 
-  struct EDNSOpts
+  uint16_t getTSIGPos()
   {
-    uint16_t d_packetsize;
-    uint8_t d_extRCode, d_version;
-    uint16_t d_Z;
-  };
-
-  //! Convenience function that fills out EDNS0 options, and returns true if there are any
-  bool getEDNSOpts(EDNSOpts* eo);
-
+    return d_tsigPos;
+  }
 private:
   void getDnsrecordheader(struct dnsrecordheader &ah);
   void init(const char *packet, unsigned int len);
   vector<uint8_t> d_content;
+  uint16_t d_tsigPos;
 };
 
 string simpleCompress(const string& label, const string& root="");

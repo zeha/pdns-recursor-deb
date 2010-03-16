@@ -1,11 +1,11 @@
 .\"     Title: rec_control
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets v1.73.2 <http://docbook.sf.net/>
-.\"      Date: 12/29/2009
+.\"      Date: 09/22/2009
 .\"    Manual: 
 .\"    Source: 
 .\"
-.TH "REC_CONTROL" "1" "12/29/2009" "" ""
+.TH "REC_CONTROL" "1" "09/22/2009" "" ""
 .\" disable hyphenation
 .nh
 .\" disable justification (adjust text to left margin only)
@@ -52,6 +52,11 @@ Where the controlsocket will live
 \-\-socket\-pid
 .RS 4
 When running in SMP mode, pid of pdns_recursor to control
+.RE
+.PP
+\-\-timeout
+.RS 4
+Number of seconds to wait for the remote PowerDNS Recursor to respond\&. Set to 0 for infinite\&.
 .RE
 .SH "COMMANDS"
 .PP

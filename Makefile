@@ -3,18 +3,14 @@ SBINDIR=/usr/sbin/
 BINDIR=/usr/bin/
 CONFIGDIR="/etc/powerdns/"
 OPTFLAGS?=-O3
-CXXFLAGS:= $(CXXFLAGS) -Wall -DBOOST_SP_DISABLE_THREADS $(OPTFLAGS) $(PROFILEFLAGS)
-CFLAGS:=$(CFLAGS) -Wall $(OPTFLAGS) $(PROFILEFLAGS)
+CXXFLAGS:= $(CXXFLAGS) -Wall $(OPTFLAGS) $(PROFILEFLAGS) -pthread
+CFLAGS:=$(CFLAGS) -Wall $(OPTFLAGS) $(PROFILEFLAGS) -pthread
+LDFLAGS:=$(LDFLAGS) -pthread
+
 LINKCC=$(CXX)
 CC?=gcc
 
 # Lua 5.1 settings
-LUA_CPPFLAGS_CONFIG ?= -I/usr/include/lua5.1
-LUA_LIBS_CONFIG ?= -llua5.1
-
-# Lua 5.0 settings
-#LUA_CPPFLAGS_CONFIG=-I/usr/include/lua50 
-#LUA_LIBS_CONFIG=-llua50 -llualib50
 
 # static dependencies
 
@@ -22,7 +18,8 @@ PDNS_RECURSOR_OBJECTS=syncres.o  misc.o unix_utility.o qtype.o logger.o  \
 arguments.o lwres.o pdns_recursor.o recursor_cache.o dnsparser.o \
 dnswriter.o dnsrecords.o rcpgenerator.o base64.o zoneparser-tng.o \
 rec_channel.o rec_channel_rec.o selectmplexer.o sillyrecords.o \
-dns_random.o aescrypt.o aeskey.o aes_modes.o aestab.o lua-pdns-recursor.o
+dns_random.o aescrypt.o aeskey.o aes_modes.o aestab.o lua-pdns-recursor.o \
+randomhelper.o recpacketcache.o dns.o reczones.o
 
 REC_CONTROL_OBJECTS=rec_channel.o rec_control.o arguments.o 
 
@@ -41,14 +38,14 @@ endif
 ifeq ($(STATIC),semi)
 	STATICFLAGS=-Wl,-Bstatic -lstdc++ $(LUALIBS) -lgcc -Wl,-Bdynamic -static-libgcc -lm -lc
 	LINKCC=$(CC)
-	LDFLAGS += malloc.o -ldl -lm
-else
-ifeq ($(STATIC),full)
+	LDFLAGS += -ldl -lm
+else 
+   ifeq ($(STATIC),full)
 	STATICFLAGS=-lstdc++ $(LUALIBS) -ldl -lm -static 
 	LINKCC=$(CC)
-else
-	LDFLAGS += malloc.o $(LUALIBS)
-endif
+   else
+	LDFLAGS +=  $(LUALIBS)
+   endif
 endif
 
 
@@ -84,8 +81,11 @@ install: all
 	cp pdns_recursor.1 rec_control.1 $(DESTDIR)/usr/share/man/man1
 	$(OS_SPECIFIC_INSTALL)	
 
-clean:
-	-rm -f dep *.o *~ pdns_recursor rec_control optional/*.o
+clean: binclean
+	-rm -f dep *~ *.gcda *.gcno optional/*.gcda optional/*.gcno
+
+binclean:
+	-rm -f *.o  pdns_recursor rec_control optional/*.o
 	
 dep:
 	$(CXX) $(CXXFLAGS) -MM -MG *.cc *.c *.hh > $@
@@ -95,7 +95,7 @@ dep:
 optional:
 	mkdir optional
 
-pdns_recursor: optional $(OPTIONALS) $(PDNS_RECURSOR_OBJECTS) malloc.o
+pdns_recursor: optional $(OPTIONALS) $(PDNS_RECURSOR_OBJECTS) 
 	$(LINKCC) $(PDNS_RECURSOR_OBJECTS) $(wildcard optional/*.o) $(LDFLAGS) -o $@
 
 rec_control: $(REC_CONTROL_OBJECTS)

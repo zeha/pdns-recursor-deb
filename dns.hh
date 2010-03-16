@@ -16,11 +16,15 @@
     along with this program; if not, write to the Free Software
     Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
-// $Id$ 
+// $Id: dns.hh 1478 2009-12-27 22:18:42Z ahu $ 
 /* (C) 2002 POWERDNS.COM BV */
 #ifndef DNS_HH
 #define DNS_HH
-
+#include <boost/multi_index_container.hpp>
+#include <boost/multi_index/ordered_index.hpp>
+#include <boost/tuple/tuple_comparison.hpp>
+#include <boost/multi_index/key_extractors.hpp>
+#include <boost/multi_index/sequenced_index.hpp>
 #include "utility.hh"
 #include "qtype.hh"
 #include <time.h>
@@ -108,8 +112,8 @@ struct dnsrecordheader
 
 struct EDNS0Record 
 { 
-	uint8_t extRCode, version; 
-	uint16_t Z; 
+        uint8_t extRCode, version; 
+        uint16_t Z; 
 } GCCPACKATTRIBUTE;
 #ifdef _MSC_VER
 #pragma pack (pop)
@@ -244,5 +248,6 @@ struct dnsheader {
 
 #define L theL()
 extern time_t s_starttime;
-
+std::string questionExpand(const char* packet, uint16_t len, uint16_t& type);
+bool dnspacketLessThan(const std::string& a, const std::string& b);
 #endif

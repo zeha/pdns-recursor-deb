@@ -11,7 +11,7 @@
 #endif
 #include <sys/time.h>
 
-using namespace boost;
+#include "namespaces.hh"
 using namespace std;
 
 class KqueueFDMultiplexer : public FDMultiplexer
@@ -93,7 +93,7 @@ int KqueueFDMultiplexer::run(struct timeval* now)
   ts.tv_nsec=500000000U;
 
   int ret=kevent(d_kqueuefd, 0, 0, d_kevents.get(), s_maxevents, &ts);
-  gettimeofday(now,0);
+  gettimeofday(now,0); // MANDATORY!
   
   if(ret < 0 && errno!=EINTR)
     throw FDMultiplexerException("kqueue returned error: "+stringerror());

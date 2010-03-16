@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2002 - 2006  PowerDNS.COM BV
+    Copyright (C) 2002 - 2009  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
@@ -32,7 +32,7 @@
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/ordered_index.hpp>
 #include <boost/multi_index/key_extractors.hpp>
-using namespace boost;
+#include "namespaces.hh"
 using namespace ::boost::multi_index;
 
 struct KeyTag {};
@@ -65,7 +65,7 @@ public:
   {
     EventKey key;
     ucontext_t *context;
-    time_t ttd;
+    struct timeval ttd;
     int tid;
   };
 
@@ -73,7 +73,7 @@ public:
     Waiter,
     indexed_by <
                 ordered_unique<member<Waiter,EventKey,&Waiter::key> >,
-                ordered_non_unique<tag<KeyTag>, member<Waiter,time_t,&Waiter::ttd> >
+                ordered_non_unique<tag<KeyTag>, member<Waiter,struct timeval,&Waiter::ttd> >
                >
   > waiters_t;
 
@@ -90,18 +90,18 @@ public:
   }
 
   typedef void tfunc_t(void *); //!< type of the pointer that starts a thread 
-  int waitEvent(EventKey &key, EventVal *val=0, unsigned int timeout=0, unsigned int now=0);
+  int waitEvent(EventKey &key, EventVal *val=0, unsigned int timeoutMsec=0, struct timeval* now=0);
   void yield();
   int sendEvent(const EventKey& key, const EventVal* val=0);
   void getEvents(std::vector<EventKey>& events);
   void makeThread(tfunc_t *start, void* val);
-  bool schedule(unsigned int now=0);
+  bool schedule(struct timeval* now=0);
   bool noProcesses();
   unsigned int numProcesses();
   int getTid(); 
 
 private:
-  static void threadWrapper(MTasker *self, tfunc_t *tf, int tid, void* val);
+  static void threadWrapper(uint32_t self1, uint32_t self2, tfunc_t *tf, int tid, uint32_t val1, uint32_t val2);
   EventKey d_eventkey;   // for waitEvent, contains exact key it was awoken for
 };
 #include "mtasker.cc"
