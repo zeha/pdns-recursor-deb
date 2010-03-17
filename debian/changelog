@@ -2,8 +2,9 @@ pdns-recursor (3.2-1) unstable; urgency=low
 
   * New upstream version.
   * Update Standards-Version to 3.8.4
+  * Fix boot order, thanks to Petter Reinholdtsen (Closes: #566877)
 
- -- Matthijs Mohlmann <matthijs@cacholong.nl>  Tue, 16 Mar 2010 16:32:07 +0100
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Wed, 17 Mar 2010 08:40:11 +0100
 
 pdns-recursor (3.1.7.2-1) unstable; urgency=high
 

@@ -1,10 +1,12 @@
 #!/bin/sh
 ### BEGIN INIT INFO
 # Provides:          pdns-recursor
-# Required-Start:    $network $remote_fs
-# Required-Stop:     $network $remote_fs
+# Required-Start:    $network $remote_fs $syslog
+# Required-Stop:     $network $remote_fs $syslog
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
+# X-Start-After:     slapd mysql postgresql
+# X-Stop-Before:     slapd mysql postgresql
 # Short-Description: Start the recursor at boot time.
 ### END INIT INFO
 
