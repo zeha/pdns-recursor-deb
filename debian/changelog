@@ -1,3 +1,9 @@
+pdns-recursor (3.2-2) unstable; urgency=low
+
+  * Remove Christoph Haas from Uploaders. Thanks for the great work!
+
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Wed, 17 Mar 2010 16:35:06 +0100
+
 pdns-recursor (3.2-1) unstable; urgency=low
 
   * New upstream version.
