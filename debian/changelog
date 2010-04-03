@@ -1,8 +1,10 @@
 pdns-recursor (3.2-2) unstable; urgency=low
 
   * Remove Christoph Haas from Uploaders. Thanks for the great work!
+  * Add fix for FTBFS thanks to Petr Salinger <Petr.Salinger@seznam.cz>
+    (Closes: #575006)
 
- -- Matthijs Mohlmann <matthijs@cacholong.nl>  Wed, 17 Mar 2010 16:35:06 +0100
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Sat, 03 Apr 2010 12:08:05 +0200
 
 pdns-recursor (3.2-1) unstable; urgency=low
 
