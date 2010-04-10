@@ -1,3 +1,5 @@
+Index: b/Makefile
+===================================================================
 --- a/Makefile
 +++ b/Makefile
 @@ -28,6 +28,9 @@
@@ -10,6 +12,8 @@
  
  ifeq ($(LUA), 1)
  	LUALIBS=$(LUA_LIBS_CONFIG)
+Index: b/kqueuemplexer.cc
+===================================================================
 --- a/kqueuemplexer.cc
 +++ b/kqueuemplexer.cc
 @@ -6,7 +6,7 @@
