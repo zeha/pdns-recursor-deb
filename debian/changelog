@@ -3,8 +3,10 @@ pdns-recursor (3.2-3) unstable; urgency=low
   * Add watch file
   * Switch to dpkg-source 3.0 (quilt) format
   * Fix FTBFS on hurd
+  * Update logcheck rules. (Closes: #588135)
+  * Update Standards-Version to 3.9.0
 
- -- Matthijs Mohlmann <matthijs@cacholong.nl>  Sat, 10 Apr 2010 16:44:28 +0200
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Mon, 19 Jul 2010 12:58:20 +0200
 
 pdns-recursor (3.2-2) unstable; urgency=low
 
