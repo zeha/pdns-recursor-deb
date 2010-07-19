@@ -31,15 +31,6 @@ then
 	update-rc.d -f pdns-recursor remove
 fi
 
-if [ -x "/etc/init.d/pdns-recursor" ]; then
-  update-rc.d pdns-recursor defaults 19 85 >/dev/null
-  if [ -x /usr/sbin/invoke-rc.d ]; then
-    invoke-rc.d pdns-recursor start || exit $?
-  else
-    /etc/init.d/pdns-recursor start || exit $?
-  fi
-fi
-
 #DEBHELPER#
 
 exit 0
