@@ -5,8 +5,9 @@ pdns-recursor (3.2-3) unstable; urgency=low
   * Fix FTBFS on hurd
   * Update logcheck rules. (Closes: #588135)
   * Update Standards-Version to 3.9.0
+  * Use dh_installinit instead of the pdns-recursor.install file.
 
- -- Matthijs Mohlmann <matthijs@cacholong.nl>  Mon, 19 Jul 2010 12:58:20 +0200
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Mon, 19 Jul 2010 14:39:02 +0200
 
 pdns-recursor (3.2-2) unstable; urgency=low
 
