@@ -22,18 +22,6 @@ case "$1" in
   ;;
 esac
 
-# Remove old stuff (Coming from before 2.9.17) if Sarge is not supported anymore
-# this can be replaced by dh_installinit in debian/rules.
-if [ -f /etc/init.d/pdns_recursor ]; then
-  if [ -x /usr/sbin/invoke-rc.d ]; then
-    invoke-rc.d pdns_recursor stop || exit $?
-  else
-    /etc/init.d/pdns_recursor stop || exit $?
-  fi
-  update-rc.d -f pdns_recursor remove >/dev/null 2>&1
-  rm -f /etc/init.d/pdns_recursor
-fi
-
 # Those using dependency based boot sequencing with sysv-rc and
 # installing pdns-recursor version 3.1.7.1-2 or earlier would have wrong
 # runlevel symlinks.  Recover from this.
@@ -42,7 +30,6 @@ if [ "$1" = "configure" ] && dpkg --compare-versions "$2" le "3.1.7.1-2" \
 then
 	update-rc.d -f pdns-recursor remove
 fi
-
 
 if [ -x "/etc/init.d/pdns-recursor" ]; then
   update-rc.d pdns-recursor defaults 19 85 >/dev/null
