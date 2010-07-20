@@ -1,3 +1,11 @@
+pdns-recursor (3.2-4) unstable; urgency=low
+
+  * Fix watch file
+  * Fix init script. (Closes: #565415)
+  * Fix FTBFS on hurd again.
+
+ -- Matthijs Mohlmann <matthijs@cacholong.nl>  Tue, 20 Jul 2010 13:42:45 +0200
+
 pdns-recursor (3.2-3) unstable; urgency=low
 
   * Add watch file

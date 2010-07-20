@@ -19,8 +19,6 @@
 #
 # initscript for PowerDNS recursor
 
-set -e
-
 . /lib/lsb/init-functions
 
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
@@ -62,7 +60,6 @@ stop() {
 #  1 if daemon was already stopped
 #  2 if daemon could not be stopped
 #  other if a failure occured
-  set +e
   start-stop-daemon --stop --quiet --retry=HUP/30/TERM/5/KILL/5 --pidfile $PIDFILE --name $NAME
   RETVAL="$?"
   [ "$RETVAL" = 2 ] && return 2
