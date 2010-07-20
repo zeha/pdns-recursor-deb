@@ -31,6 +31,12 @@ then
 	update-rc.d -f pdns-recursor remove
 fi
 
+# Init script has errors in previous versions. Postinst script should just
+# return the exit status of this script
+initscript_error() {
+	return $1
+}
+
 #DEBHELPER#
 
 exit 0
