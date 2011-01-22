@@ -2,6 +2,7 @@ pdns-recursor (3.3-1) unstable; urgency=low
 
   * New upstream release.
   * Now my name is spelled correctly.
+  * Update Standards-Version to 3.9.1
 
  -- Matthijs Möhlmann <matthijs@cacholong.nl>  Sat, 22 Jan 2011 15:48:18 +0100
 
