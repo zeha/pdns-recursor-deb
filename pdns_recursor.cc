@@ -26,6 +26,7 @@
 #endif // WIN32
 
 #include <boost/foreach.hpp>
+
 #include <pthread.h>
 #include "recpacketcache.hh"
 #include "utility.hh" 
@@ -35,6 +36,7 @@
 #include <map>
 #include <set>
 #include "recursor_cache.hh"
+#include "cachecleaner.hh"
 #include <stdio.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -99,6 +101,8 @@ __thread RecursorPacketCache* t_packetCache;
 RecursorStats g_stats;
 bool g_quiet;
 
+bool g_weDistributeQueries; // if true, only 1 thread listens on the incoming query sockets
+
 static __thread NetmaskGroup* t_allowFrom;
 static NetmaskGroup* g_initialAllowFrom; // new thread needs to be setup with this
 
@@ -124,7 +128,7 @@ struct DNSComboWriter {
         											        d_tcp(false), d_socket(-1)
   {}
   MOADNSParser d_mdp;
-  void setRemote(ComboAddress* sa)
+  void setRemote(const ComboAddress* sa)
   {
     d_remote=*sa;
   }
@@ -143,6 +147,7 @@ struct DNSComboWriter {
   ComboAddress d_remote;
   bool d_tcp;
   int d_socket;
+  shared_ptr<TCPConnection> d_tcpConnection;
 };
 
 
@@ -199,7 +204,7 @@ int arecvtcp(string& data, int len, Socket* sock)
 }
 
 vector<ComboAddress> g_localQueryAddresses4, g_localQueryAddresses6; 
-ComboAddress g_local4("0.0.0.0"), g_local6("::");
+const ComboAddress g_local4("0.0.0.0"), g_local6("::");
 
 //! pick a random query local address
 ComboAddress getQueryLocalAddress(int family, uint16_t port)
@@ -443,34 +448,26 @@ static void writePid(void)
     L<<Logger::Error<<"Requested to write pid for "<<Utility::getpid()<<" to "<<s_pidfname<<" failed: "<<strerror(errno)<<endl;
 }
 
+typedef map<ComboAddress, uint32_t, ComboAddress::addressOnlyLessThan> tcpClientCounts_t;
+tcpClientCounts_t __thread* t_tcpClientCounts;
 
-map<ComboAddress, uint32_t> g_tcpClientCounts;
 
-struct TCPConnection
+TCPConnection::TCPConnection(int fd, const ComboAddress& addr) : d_remote(addr), d_fd(fd)
+{ 
+  ++s_currentConnections; 
+  (*t_tcpClientCounts)[d_remote]++;
+}
+
+TCPConnection::~TCPConnection()
 {
-  int fd;
-  enum stateenum {BYTE0, BYTE1, GETQUESTION, DONE} state;
-  int qlen;
-  int bytesread;
-  ComboAddress remote;
-  char data[65535];
-  time_t startTime;
+  if(Utility::closesocket(d_fd) < 0) 
+    unixDie("closing socket for TCPConnection");
+  if(t_tcpClientCounts->count(d_remote) && !(*t_tcpClientCounts)[d_remote]--) 
+    t_tcpClientCounts->erase(d_remote);
+  --s_currentConnections;
+}
 
-  static void closeAndCleanup(int fd, const ComboAddress& remote) 
-  {
-    Utility::closesocket(fd);
-    if(!g_tcpClientCounts[remote]--) 
-      g_tcpClientCounts.erase(remote);
-    s_currentConnections--;
-  }
-  void closeAndCleanup()
-  {
-    closeAndCleanup(fd, remote);
-  }
-  static unsigned int s_currentConnections; //!< total number of current TCP connections
-};
-
-unsigned int TCPConnection::s_currentConnections; 
+AtomicCounter TCPConnection::s_currentConnections; 
 void handleRunningTCPQuestion(int fd, FDMultiplexer::funcparam_t& var);
 
 void updateRcodeStats(int res)
@@ -522,14 +519,17 @@ void startDoResolve(void *p)
 
     int res;
 
-    if(!t_pdl->get() || !(*t_pdl)->preresolve(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res)) {
+    bool variableAnswer = false;
+    // if there is a PowerDNSLua active, and it 'took' the query in preResolve, we don't launch beginResolve
+    if(!t_pdl->get() || !(*t_pdl)->preresolve(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer)) {
        res = sr.beginResolve(dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), dc->d_mdp.d_qclass, ret);
 
       if(t_pdl->get()) {
         if(res == RCode::NXDomain)
-          (*t_pdl)->nxdomain(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res);
+          (*t_pdl)->nxdomain(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
       }
     }
+    
     uint32_t minTTL=numeric_limits<uint32_t>::max();
     if(res<0) {
       pw.getHeader()->rcode=RCode::ServFail;
@@ -568,11 +568,11 @@ void startDoResolve(void *p)
   sendit:;
     if(!dc->d_tcp) {
       sendto(dc->d_socket, (const char*)&*packet.begin(), packet.size(), 0, (struct sockaddr *)(&dc->d_remote), dc->d_remote.getSocklen());
-      if(!SyncRes::s_nopacketcache) {
+      if(!SyncRes::s_nopacketcache && !variableAnswer ) {
         t_packetCache->insertResponsePacket(string((const char*)&*packet.begin(), packet.size()), g_now.tv_sec, 
         				   min(minTTL, 
-        				       pw.getHeader()->rcode == RCode::ServFail ? SyncRes::s_packetcacheservfailttl : SyncRes::s_packetcachettl
-        				       )
+        				       (pw.getHeader()->rcode == RCode::ServFail) ? SyncRes::s_packetcacheservfailttl : SyncRes::s_packetcachettl
+        				       ) 
         				  );
       }
     }
@@ -602,17 +602,13 @@ void startDoResolve(void *p)
     
       if(hadError) {
         // no need to remove us from FDM, we weren't there
-        TCPConnection::closeAndCleanup(dc->d_socket, dc->d_remote);
+        dc->d_socket = -1;
       }
       else {
-        TCPConnection tc;
-        tc.fd=dc->d_socket;
-        tc.state=TCPConnection::BYTE0;
-        tc.remote=dc->d_remote;
+        dc->d_tcpConnection->state=TCPConnection::BYTE0;
         Utility::gettimeofday(&g_now, 0); // needs to be updated
-        tc.startTime=g_now.tv_sec;
-        t_fdm->addReadFD(tc.fd, handleRunningTCPQuestion, tc);
-        t_fdm->setReadTTD(tc.fd, g_now, g_tcpTimeout);
+        t_fdm->addReadFD(dc->d_socket, handleRunningTCPQuestion, dc->d_tcpConnection);
+        t_fdm->setReadTTD(dc->d_socket, g_now, g_tcpTimeout);
       }
     }
     
@@ -640,15 +636,19 @@ void startDoResolve(void *p)
       g_stats.avgLatencyUsec=(uint64_t)((1-0.0001)*g_stats.avgLatencyUsec + 0.0001*newLat);
 
     delete dc;
+    dc=0;
   }
   catch(AhuException &ae) {
     L<<Logger::Error<<"startDoResolve problem: "<<ae.reason<<endl;
+    delete dc;
   }
   catch(MOADNSException& e) {
     L<<Logger::Error<<"DNS parser error: "<<dc->d_mdp.d_qname<<", "<<e.what()<<endl;
+    delete dc;
   }
   catch(std::exception& e) {
     L<<Logger::Error<<"STL error: "<<e.what()<<endl;
+    delete dc;
   }
   catch(...) {
     L<<Logger::Error<<"Any other exception in a resolver context"<<endl;
@@ -685,10 +685,10 @@ void makeControlChannelSocket()
 
 void handleRunningTCPQuestion(int fd, FDMultiplexer::funcparam_t& var)
 {
-  TCPConnection* conn=any_cast<TCPConnection>(&var);
+  shared_ptr<TCPConnection> conn=any_cast<shared_ptr<TCPConnection> >(var);
 
   if(conn->state==TCPConnection::BYTE0) {
-    int bytes=recv(conn->fd, conn->data, 2, 0);
+    int bytes=recv(conn->getFD(), conn->data, 2, 0);
     if(bytes==1)
       conn->state=TCPConnection::BYTE1;
     if(bytes==2) { 
@@ -697,14 +697,12 @@ void handleRunningTCPQuestion(int fd, FDMultiplexer::funcparam_t& var)
       conn->state=TCPConnection::GETQUESTION;
     }
     if(!bytes || bytes < 0) {
-      TCPConnection tmp(*conn); 
       t_fdm->removeReadFD(fd);
-      tmp.closeAndCleanup();
       return;
     }
   }
   else if(conn->state==TCPConnection::BYTE1) {
-    int bytes=recv(conn->fd, conn->data+1, 1, 0);
+    int bytes=recv(conn->getFD(), conn->data+1, 1, 0);
     if(bytes==1) {
       conn->state=TCPConnection::GETQUESTION;
       conn->qlen=(((unsigned char)conn->data[0]) << 8)+ (unsigned char)conn->data[1];
@@ -712,53 +710,45 @@ void handleRunningTCPQuestion(int fd, FDMultiplexer::funcparam_t& var)
     }
     if(!bytes || bytes < 0) {
       if(g_logCommonErrors)
-        L<<Logger::Error<<"TCP client "<< conn->remote.toString() <<" disconnected after first byte"<<endl;
-      TCPConnection tmp(*conn); 
+        L<<Logger::Error<<"TCP client "<< conn->d_remote.toString() <<" disconnected after first byte"<<endl;
       t_fdm->removeReadFD(fd);
-      tmp.closeAndCleanup();  // conn loses validity here..
       return;
     }
   }
   else if(conn->state==TCPConnection::GETQUESTION) {
-    int bytes=recv(conn->fd, conn->data + conn->bytesread, conn->qlen - conn->bytesread, 0);
+    int bytes=recv(conn->getFD(), conn->data + conn->bytesread, conn->qlen - conn->bytesread, 0);
     if(!bytes || bytes < 0) {
-      L<<Logger::Error<<"TCP client "<< conn->remote.toString() <<" disconnected while reading question body"<<endl;
-      TCPConnection tmp(*conn);
+      L<<Logger::Error<<"TCP client "<< conn->d_remote.toString() <<" disconnected while reading question body"<<endl;
       t_fdm->removeReadFD(fd);
-      tmp.closeAndCleanup();  // conn loses validity here..
-
       return;
     }
     conn->bytesread+=bytes;
     if(conn->bytesread==conn->qlen) {
-      TCPConnection tconn(*conn); 
       t_fdm->removeReadFD(fd); // should no longer awake ourselves when there is data to read
 
       DNSComboWriter* dc=0;
       try {
-        dc=new DNSComboWriter(tconn.data, tconn.qlen, g_now);
+        dc=new DNSComboWriter(conn->data, conn->qlen, g_now);
       }
       catch(MOADNSException &mde) {
         g_stats.clientParseError++; 
         if(g_logCommonErrors)
-          L<<Logger::Error<<"Unable to parse packet from TCP client "<< tconn.remote.toString() <<endl;
-        tconn.closeAndCleanup();
+          L<<Logger::Error<<"Unable to parse packet from TCP client "<< conn->d_remote.toString() <<endl;
         return;
       }
-      
-      dc->setSocket(tconn.fd);
+      dc->d_tcpConnection = conn; // carry the torch
+      dc->setSocket(conn->getFD()); // this is the only time a copy is made of the actual fd
       dc->d_tcp=true;
-      dc->setRemote(&tconn.remote);
+      dc->setRemote(&conn->d_remote);
       if(dc->d_mdp.d_header.qr) {
         delete dc;
         L<<Logger::Error<<"Ignoring answer on server socket!"<<endl;
-        tconn.closeAndCleanup();
         return;
       }
       else {
         ++g_stats.qcounter;
         ++g_stats.tcpqcounter;
-        MT->makeThread(startDoResolve, dc); // deletes dc
+        MT->makeThread(startDoResolve, dc); // deletes dc, will set state to BYTE0 again
         return;
       }
     }
@@ -787,27 +777,64 @@ void handleNewTCPQuestion(int fd, FDMultiplexer::funcparam_t& )
       Utility::closesocket(newsock);
       return;
     }
-    
-    if(g_maxTCPPerClient && g_tcpClientCounts.count(addr) && g_tcpClientCounts[addr] >= g_maxTCPPerClient) {
+    if(g_maxTCPPerClient && t_tcpClientCounts->count(addr) && (*t_tcpClientCounts)[addr] >= g_maxTCPPerClient) {
       g_stats.tcpClientOverflow++;
       Utility::closesocket(newsock); // don't call TCPConnection::closeAndCleanup here - did not enter it in the counts yet!
       return;
     }
-    g_tcpClientCounts[addr]++;
+    
     Utility::setNonBlocking(newsock);
-    TCPConnection tc;
-    tc.fd=newsock;
-    tc.state=TCPConnection::BYTE0;
-    tc.remote=addr;
-    tc.startTime=g_now.tv_sec;
-    TCPConnection::s_currentConnections++;
-    t_fdm->addReadFD(tc.fd, handleRunningTCPQuestion, tc);
+    shared_ptr<TCPConnection> tc(new TCPConnection(newsock, addr));
+    tc->state=TCPConnection::BYTE0;
+    
+    t_fdm->addReadFD(tc->getFD(), handleRunningTCPQuestion, tc);
 
     struct timeval now;
     Utility::gettimeofday(&now, 0);
-    t_fdm->setReadTTD(tc.fd, now, g_tcpTimeout);
+    t_fdm->setReadTTD(tc->getFD(), now, g_tcpTimeout);
   }
 }
+ 
+string* doProcessUDPQuestion(const std::string& question, const ComboAddress& fromaddr, int fd)
+{
+  ++g_stats.qcounter;
+
+  string response;
+  try {
+    uint32_t age;
+    if(!SyncRes::s_nopacketcache && t_packetCache->getResponsePacket(question, g_now.tv_sec, &response, &age)) {
+      if(!g_quiet)
+	L<<Logger::Error<<t_id<< " question answered from packet cache from "<<fromaddr.toString()<<endl;
+
+      g_stats.packetCacheHits++;
+      SyncRes::s_queries++;
+      ageDNSPacket(response, age);
+      sendto(fd, response.c_str(), response.length(), 0, (struct sockaddr*) &fromaddr, fromaddr.getSocklen());
+      if(response.length() >= sizeof(struct dnsheader))
+	updateRcodeStats(((struct dnsheader*)response.c_str())->rcode);
+      g_stats.avgLatencyUsec=(uint64_t)((1-0.0001)*g_stats.avgLatencyUsec + 0); // we assume 0 usec
+      return 0;
+    }
+  } 
+  catch(std::exception& e) {
+    L<<Logger::Error<<"Error processing or aging answer packet: "<<e.what()<<endl;
+    return 0;
+  }
+  
+  
+  if(MT->numProcesses() > g_maxMThreads) {
+    g_stats.overCapacityDrops++;
+    return 0;
+  }
+  
+  DNSComboWriter* dc = new DNSComboWriter(question.c_str(), question.size(), g_now);
+  dc->setSocket(fd);
+  dc->setRemote(&fromaddr);
+
+  dc->d_tcp=false;
+  MT->makeThread(startDoResolve, (void*) dc); // deletes dc
+  return 0;
+} 
  
 void handleNewUDPQuestion(int fd, FDMultiplexer::funcparam_t& var)
 {
@@ -834,38 +861,11 @@ void handleNewUDPQuestion(int fd, FDMultiplexer::funcparam_t& var)
           L<<Logger::Error<<"Ignoring answer from "<<fromaddr.toString()<<" on server socket!"<<endl;
       }
       else {
-        ++g_stats.qcounter;
-
-        string response;
-        try {
-          if(!SyncRes::s_nopacketcache && t_packetCache->getResponsePacket(string(data, len), g_now.tv_sec, &response)) {
-            if(!g_quiet)
-              L<<Logger::Error<<t_id<< " question answered from packet cache from "<<fromaddr.toString()<<endl;
-  
-            g_stats.packetCacheHits++;
-            SyncRes::s_queries++;
-            sendto(fd, response.c_str(), response.length(), 0, (struct sockaddr*) &fromaddr, fromaddr.getSocklen());
-            if(response.length() >= sizeof(struct dnsheader))
-              updateRcodeStats(((struct dnsheader*)response.c_str())->rcode);
-            g_stats.avgLatencyUsec=(uint64_t)((1-0.0001)*g_stats.avgLatencyUsec + 0); // we assume 0 usec
-            return;
-          }
-        } 
-        catch(std::exception& e) {
-          throw MOADNSException(e.what()); // translate
-        }
-        if(MT->numProcesses() > g_maxMThreads) {
-          g_stats.overCapacityDrops++;
-          return;
-        }
-  
-        DNSComboWriter* dc = new DNSComboWriter(data, len, g_now);
-        dc->setSocket(fd);
-        dc->setRemote(&fromaddr);
-
-        dc->d_tcp=false;
-
-        MT->makeThread(startDoResolve, (void*) dc); // deletes dc
+	string question(data, len);
+	if(g_weDistributeQueries)
+	  distributeAsyncFunction(boost::bind(doProcessUDPQuestion, question, fromaddr, fd));
+	else
+	  doProcessUDPQuestion(question, fromaddr, fd);
       }
     }
     catch(MOADNSException& mde) {
@@ -880,6 +880,7 @@ void handleNewUDPQuestion(int fd, FDMultiplexer::funcparam_t& var)
       g_stats.noPacketError++;
   }
 }
+
 
 typedef vector<pair<int, function< void(int, any&) > > > deferredAdd_t;
 deferredAdd_t deferredAdd;
@@ -904,7 +905,7 @@ void makeTCPServerSockets()
     sin.sin4.sin_family = AF_INET;
     if(!IpToU32(st.host, (uint32_t*)&sin.sin4.sin_addr.s_addr)) {
       sin.sin6.sin6_family = AF_INET6;
-      if(Utility::inet_pton(AF_INET6, st.host.c_str(), &sin.sin6.sin6_addr) <= 0)
+      if(makeIPv6sockaddr(st.host, &sin.sin6) < 0)
         throw AhuException("Unable to resolve local address for TCP server on '"+ st.host +"'"); 
     }
 
@@ -968,7 +969,7 @@ void makeUDPServerSockets()
     sin.sin4.sin_family = AF_INET;
     if(!IpToU32(st.host.c_str() , (uint32_t*)&sin.sin4.sin_addr.s_addr)) {
       sin.sin6.sin6_family = AF_INET6;
-      if(Utility::inet_pton(AF_INET6, st.host.c_str(), &sin.sin6.sin6_addr) <= 0)
+      if(makeIPv6sockaddr(st.host, &sin.sin6) < 0)
         throw AhuException("Unable to resolve local address for UDP server on '"+ st.host +"'"); 
     }
     
@@ -1083,7 +1084,7 @@ try
   struct timeval now;
   Utility::gettimeofday(&now, 0);
 
-//  clog<<"* "<<t_id<<" "<<(void*)&last_stat<<"\t"<<(unsigned int)last_stat<<endl;
+  // clog<<"* "<<t_id<<" "<<(void*)&last_stat<<"\t"<<(unsigned int)last_stat<<endl;
 
   if(now.tv_sec - last_prune > (time_t)(5 + t_id)) { 
     DTime dt;
@@ -1091,11 +1092,7 @@ try
     t_RC->doPrune(); // this function is local to a thread, so fine anyhow
     t_packetCache->doPruneTo(::arg().asNum("max-packetcache-entries") / g_numThreads);
     
-    typedef SyncRes::negcache_t::nth_index<1>::type negcache_by_ttd_index_t;
-    negcache_by_ttd_index_t& ttdindex=boost::multi_index::get<1>(t_sstorage->negcache); 
-
-    negcache_by_ttd_index_t::iterator i=ttdindex.lower_bound(now.tv_sec);
-    ttdindex.erase(ttdindex.begin(), i);
+    pruneCollection(t_sstorage->negcache, ::arg().asNum("max-cache-entries") / (g_numThreads * 10), 200);
     
     if(!((cleanCounter++)%40)) {  // this is a full scan!
       time_t limit=now.tv_sec-300;
@@ -1158,6 +1155,12 @@ void makeThreadPipes()
   }
 }
 
+struct ThreadMSG
+{
+  pipefunc_t func;
+  bool wantAnswer;
+};
+
 void broadcastFunction(const pipefunc_t& func, bool skipSelf)
 {
   unsigned int n = 0;
@@ -1168,9 +1171,11 @@ void broadcastFunction(const pipefunc_t& func, bool skipSelf)
         func(); // don't write to ourselves!
       continue;
     }
-      
-    pipefunc_t *funcptr = new pipefunc_t(func);
-    if(write(tps.writeToThread, &funcptr, sizeof(funcptr)) != sizeof(funcptr))
+  
+    ThreadMSG* tmsg = new ThreadMSG();
+    tmsg->func = func;
+    tmsg->wantAnswer = true;
+    if(write(tps.writeToThread, &tmsg, sizeof(tmsg)) != sizeof(tmsg))
       unixDie("write to thread pipe returned wrong size or error");
     
     string* resp;
@@ -1183,22 +1188,39 @@ void broadcastFunction(const pipefunc_t& func, bool skipSelf)
     }
   }
 }
-
-
+void distributeAsyncFunction(const pipefunc_t& func)
+{
+  static unsigned int counter;
+  unsigned int target = 1 + (++counter % (g_pipes.size()-1));
+  // cerr<<"Sending to: "<<target<<endl;
+  if(target == t_id) {
+    func();
+    return;
+  }
+  ThreadPipeSet& tps = g_pipes[target];    
+  ThreadMSG* tmsg = new ThreadMSG();
+  tmsg->func = func;
+  tmsg->wantAnswer = false;
+  
+  if(write(tps.writeToThread, &tmsg, sizeof(tmsg)) != sizeof(tmsg))
+    unixDie("write to thread pipe returned wrong size or error");
+    
+}
 
 void handlePipeRequest(int fd, FDMultiplexer::funcparam_t& var)
 {
-  pipefunc_t* func;
-  if(read(fd, &func, sizeof(func)) != sizeof(func)) { // fd == readToThread 
+  ThreadMSG* tmsg;
+  
+  if(read(fd, &tmsg, sizeof(tmsg)) != sizeof(tmsg)) { // fd == readToThread 
     unixDie("read from thread pipe returned wrong size or error");
   }
   
-  void *resp = (*func)();
+  void *resp = tmsg->func();
+  if(tmsg->wantAnswer)
+    if(write(g_pipes[t_id].writeFromThread, &resp, sizeof(resp)) != sizeof(resp))
+      unixDie("write to thread pipe returned wrong size or error");
   
-  if(write(g_pipes[t_id].writeFromThread, &resp, sizeof(resp)) != sizeof(resp))
-    unixDie("write to thread pipe returned wrong size or error");
-  
-  delete func;
+  delete tmsg;
 }
 
 template<class T> void *voider(const boost::function<T*()>& func)
@@ -1211,8 +1233,6 @@ vector<ComboAddress>& operator+=(vector<ComboAddress>&a, const vector<ComboAddre
   a.insert(a.end(), b.begin(), b.end());
   return a;
 }
-
-
 
 template<class T> T broadcastAccFunction(const boost::function<T*()>& func, bool skipSelf)
 {
@@ -1232,9 +1252,13 @@ template<class T> T broadcastAccFunction(const boost::function<T*()>& func, bool
       continue;
     }
       
-    pipefunc_t *funcptr = new pipefunc_t(boost::bind(voider<T>, func));
-    if(write(tps.writeToThread, &funcptr, sizeof(funcptr)) != sizeof(funcptr))
+    ThreadMSG* tmsg = new ThreadMSG();
+    tmsg->func = boost::bind(voider<T>, func);
+    tmsg->wantAnswer = true;
+  
+    if(write(tps.writeToThread, &tmsg, sizeof(tmsg)) != sizeof(tmsg))
       unixDie("write to thread pipe returned wrong size or error");
+  
     
     T* resp;
     if(read(tps.readFromThread, &resp, sizeof(resp)) != sizeof(resp))
@@ -1403,7 +1427,6 @@ void handleUDPServerResponse(int fd, FDMultiplexer::funcparam_t& var)
   retryWithName:
 
     if(!MT->sendEvent(pident, &packet)) {
-      
       // we do a full scan for outstanding queries on unexpected answers. not too bad since we only accept them on the right port number, which is hard enough to guess
       for(MT_t::waiters_t::iterator mthread=MT->d_waiters.begin(); mthread!=MT->d_waiters.end(); ++mthread) {
         if(pident.fd==mthread->key.fd && mthread->key.remote==pident.remote &&  mthread->key.type == pident.type &&
@@ -1414,15 +1437,15 @@ void handleUDPServerResponse(int fd, FDMultiplexer::funcparam_t& var)
         // be a bit paranoid here since we're weakening our matching
         if(pident.domain.empty() && !mthread->key.domain.empty() && !pident.type && mthread->key.type && 
            pident.id  == mthread->key.id && mthread->key.remote == pident.remote) {
-          //	    cerr<<"Empty response, rest matches though, sending to a waiter"<<endl;
+          // cerr<<"Empty response, rest matches though, sending to a waiter"<<endl;
           pident.domain = mthread->key.domain;
           pident.type = mthread->key.type;
-          goto retryWithName;
+          goto retryWithName; // note that this only passes on an error, lwres will still reject the packet
         }
       }
       g_stats.unexpectedCount++; // if we made it here, it really is an unexpected answer
       if(g_logCommonErrors)
-        L<<Logger::Warning<<"Discarding unexpected packet from "<<fromaddr.toString()<<": "<<pident.domain<<", "<<pident.type<<endl;
+        L<<Logger::Warning<<"Discarding unexpected packet from "<<fromaddr.toStringWithPort()<<": "<<pident.domain<<", "<<pident.type<<endl;
     }
     else if(fd >= 0) {
       t_udpclientsocks->returnSocket(fd);
@@ -1531,6 +1554,7 @@ void parseACLs()
   else if(!::arg()["allow-from"].empty()) {
     vector<string> ips;
     stringtok(ips, ::arg()["allow-from"], ", ");
+    
     L<<Logger::Warning<<"Only allowing queries from: ";
     for(vector<string>::const_iterator i = ips.begin(); i!= ips.end(); ++i) {
       allowFrom->addMask(*i);
@@ -1598,6 +1622,9 @@ int serviceMain(int argc, char*argv[])
     g_dontQuery=new NetmaskGroup;
     vector<string> ips;
     stringtok(ips, ::arg()["dont-query"], ", ");
+    ips.push_back("0.0.0.0");
+    ips.push_back("::");
+
     L<<Logger::Warning<<"Will not send queries to: ";
     for(vector<string>::const_iterator i = ips.begin(); i!= ips.end(); ++i) {
       g_dontQuery->addMask(*i);
@@ -1609,6 +1636,11 @@ int serviceMain(int argc, char*argv[])
   }
 
   g_quiet=::arg().mustDo("quiet");
+  g_weDistributeQueries = ::arg().mustDo("pdns-distributes-queries");
+  if(g_weDistributeQueries) {
+      L<<Logger::Warning<<"PowerDNS Recursor itself will distribute queries over threads"<<endl;
+  }
+  
   if(::arg().mustDo("trace")) {
     SyncRes::setLog(true);
     ::arg().set("quiet")="no";
@@ -1663,6 +1695,11 @@ int serviceMain(int argc, char*argv[])
   makeUDPServerSockets();
   makeTCPServerSockets();
 
+  for(int forks = 0; forks < ::arg().asNum("processes") - 1; ++forks) {
+    if(!fork()) // we are child
+      break;
+  }
+  
   s_pidfname=::arg()["socket-dir"]+"/"+s_programname+".pid";
   if(!s_pidfname.empty())
     unlink(s_pidfname.c_str()); // remove possible old pid file 
@@ -1687,7 +1724,6 @@ int serviceMain(int argc, char*argv[])
   if(!::arg()["setuid"].empty())
     newuid=Utility::makeUidNumeric(::arg()["setuid"]);
 
-#ifndef WIN32
   if (!::arg()["chroot"].empty()) {
     if (chroot(::arg()["chroot"].c_str())<0 || chdir("/") < 0) {
       L<<Logger::Error<<"Unable to chroot to '"+::arg()["chroot"]+"': "<<strerror (errno)<<", exiting"<<endl;
@@ -1698,7 +1734,7 @@ int serviceMain(int argc, char*argv[])
   Utility::dropPrivs(newuid, newgid);
   
   
-  g_numThreads = ::arg().asNum("threads");
+  g_numThreads = ::arg().asNum("threads") + ::arg().mustDo("pdns-distributes-queries");
   
   makeThreadPipes();
   
@@ -1732,6 +1768,7 @@ try
   t_sstorage->domainmap = g_initialDomainMap;
   t_allowFrom = g_initialAllowFrom;
   t_udpclientsocks = new UDPClientSocks();
+  t_tcpClientCounts = new tcpClientCounts_t();
   primeHints();
   
   t_packetCache = new RecursorPacketCache();
@@ -1770,15 +1807,14 @@ try
 
   t_fdm->addReadFD(g_pipes[t_id].readToThread, handlePipeRequest);
 
-  for(deferredAdd_t::const_iterator i=deferredAdd.begin(); i!=deferredAdd.end(); ++i) 
-    t_fdm->addReadFD(i->first, i->second);
+  if(!g_weDistributeQueries || !t_id)  // if we distribute queries, only t_id = 0 listens
+    for(deferredAdd_t::const_iterator i=deferredAdd.begin(); i!=deferredAdd.end(); ++i) 
+      t_fdm->addReadFD(i->first, i->second);
   
   if(!t_id) {
-    
     t_fdm->addReadFD(s_rcc.d_fd, handleRCC); // control channel
   }
-#endif 
-  
+
   unsigned int maxTcpClients=::arg().asNum("max-tcp-clients");
   
   bool listenOnTCP(true);
@@ -1796,11 +1832,10 @@ try
       expired_t expired=t_fdm->getTimeouts(g_now);
         
       for(expired_t::iterator i=expired.begin() ; i != expired.end(); ++i) {
-        TCPConnection conn=any_cast<TCPConnection>(i->second);
+        shared_ptr<TCPConnection> conn=any_cast<shared_ptr<TCPConnection> >(i->second);
         if(g_logCommonErrors)
-          L<<Logger::Warning<<"Timeout from remote TCP client "<< conn.remote.toString() <<endl;
+          L<<Logger::Warning<<"Timeout from remote TCP client "<< conn->d_remote.toString() <<endl;
         t_fdm->removeReadFD(i->first);
-        conn.closeAndCleanup();
       }
     }
       
@@ -1815,14 +1850,14 @@ try
     // 'run' updates g_now for us
 
     if(listenOnTCP) {
-      if(TCPConnection::s_currentConnections > maxTcpClients) {  // shutdown, too many connections
+      if(TCPConnection::getCurrentConnections() > maxTcpClients) {  // shutdown, too many connections
         for(tcpListenSockets_t::iterator i=g_tcpListenSockets.begin(); i != g_tcpListenSockets.end(); ++i)
           t_fdm->removeReadFD(*i);
         listenOnTCP=false;
       }
     }
     else {
-      if(TCPConnection::s_currentConnections <= maxTcpClients) {  // reenable
+      if(TCPConnection::getCurrentConnections() <= maxTcpClients) {  // reenable
         for(tcpListenSockets_t::iterator i=g_tcpListenSockets.begin(); i != g_tcpListenSockets.end(); ++i)
           t_fdm->addReadFD(*i, handleNewTCPQuestion);
         listenOnTCP=true;
@@ -1894,6 +1929,7 @@ int main(int argc, char **argv)
     ::arg().set("setuid","If set, change user id to this uid for more security")="";
     ::arg().set("network-timeout", "Wait this nummer of milliseconds for network i/o")="1500";
     ::arg().set("threads", "Launch this number of threads")="2";
+    ::arg().set("processes", "Launch this number of processes (EXPERIMENTAL, DO NOT CHANGE)")="1";
 #ifdef WIN32
     ::arg().set("quiet","Suppress logging of questions and answers")="off";
     ::arg().setSwitch( "register-service", "Register the service" )= "no";
@@ -1929,7 +1965,7 @@ int main(int argc, char **argv)
     ::arg().set("packetcache-servfail-ttl", "maximum number of seconds to keep a cached servfail entry in packetcache")="60";
     ::arg().set("server-id", "Returned when queried for 'server.id' TXT or NSID, defaults to hostname")="";
     ::arg().set("remotes-ringbuffer-entries", "maximum number of packets to store statistics for")="0";
-    ::arg().set("version-string", "string reported on version.pdns or version.bind")="PowerDNS Recursor "VERSION" $Id: pdns_recursor.cc 1538 2010-03-06 11:39:03Z ahu $";
+    ::arg().set("version-string", "string reported on version.pdns or version.bind")="PowerDNS Recursor "VERSION" $Id: pdns_recursor.cc 1712 2010-09-11 13:40:03Z ahu $";
     ::arg().set("allow-from", "If set, only allow these comma separated netmasks to recurse")=LOCAL_NETS;
     ::arg().set("allow-from-file", "If set, load allowed netmasks from this file")="";
     ::arg().set("entropy-source", "If set, read entropy from this file")="/dev/urandom";
@@ -1949,7 +1985,9 @@ int main(int argc, char **argv)
     ::arg().setSwitch( "ignore-rd-bit", "Assume each packet requires recursion, for compatability" )= "off"; 
     ::arg().setSwitch( "disable-edns-ping", "Disable EDNSPing" )= "no"; 
     ::arg().setSwitch( "disable-edns", "Disable EDNS" )= ""; 
-    ::arg().setSwitch( "disable-packetcache", "Disable packetcahe" )= "no"; 
+    ::arg().setSwitch( "disable-packetcache", "Disable packetcache" )= "no"; 
+    ::arg().setSwitch( "pdns-distributes-queries", "If PowerDNS itself should distribute queries over threads (EXPERIMENTAL)")="no";
+    
 
     ::arg().setCmd("help","Provide a helpful message");
     ::arg().setCmd("version","Print version string ("VERSION")");

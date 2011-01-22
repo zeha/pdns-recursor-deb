@@ -22,6 +22,7 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string.hpp>
 #include <iostream>
+#include "base32.hh"
 #include "base64.hh"
 #include "namespaces.hh"
 
@@ -77,7 +78,7 @@ void RecordTextReader::xfrTime(uint32_t &val)
 
   tm.tm_year-=1900;
   tm.tm_mon-=1;
-//  val=(uint32_t)timegm(&tm); XXX FIXME disabled for Solaris
+  val=(uint32_t)Utility::timegm(&tm); 
 }
 
 void RecordTextReader::xfrIP(uint32_t &val)
@@ -244,6 +245,26 @@ void RecordTextReader::xfrHexBlob(string& val)
   HEXDecode(d_string.c_str()+pos, d_string.c_str() + d_pos, val);
 }
 
+void RecordTextReader::xfrBase32HexBlob(string& val)
+{
+  skipSpaces();
+  int pos=(int)d_pos;
+  while(d_pos < d_end && !dns_isspace(d_string[d_pos]))
+    d_pos++;
+
+  val=fromBase32Hex(string(d_string.c_str()+pos, d_pos-pos));
+}
+
+
+void RecordTextWriter::xfrBase32HexBlob(const string& val)
+{
+  if(!d_string.empty())
+    d_string.append(1,' ');
+
+  d_string.append(toBase32Hex(val));
+}
+
+
 void RecordTextReader::xfrText(string& val, bool multi)
 {
   val.clear();
@@ -254,9 +275,19 @@ void RecordTextReader::xfrText(string& val, bool multi)
       val.append(1, ' ');
 
     skipSpaces();
-    if(d_string[d_pos]!='"')
+    if(d_string[d_pos]!='"') { // special case 'plenus' - without quotes
+      string::size_type pos = d_pos;
+      while(pos != d_end && isalnum(d_string[pos]))
+        pos++;
+      if(pos == d_end) {
+        val.append(1, '"');
+        val.append(d_string.c_str() + d_pos, d_end - d_pos);
+        val.append(1, '"');
+        d_pos = d_end;
+        break;
+      }
       throw RecordTextException("Data field in DNS should start with quote (\") at position "+lexical_cast<string>(d_pos)+" of '"+d_string+"'");
-
+    }
     val.append(1, '"');
     while(++d_pos < d_end && d_string[d_pos]!='"') {
       if(d_string[d_pos]=='\\' && d_pos+1!=d_end) {

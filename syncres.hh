@@ -29,6 +29,10 @@ struct NegCacheEntry
   QType d_qtype;
   string d_qname;
   uint32_t d_ttd;
+  uint32_t getTTD() const
+  {
+    return d_ttd;
+  }
 };
 
 
@@ -190,8 +194,6 @@ public:
     d_doEDNS0=state;
   }
 
-
-
   int asyncresolveWrapper(const ComboAddress& ip, const string& domain, int type, bool doTCP, bool sendRDQuery, struct timeval* now, LWResult* res);
   
   static void doEDNSDumpAndClose(int fd);
@@ -199,6 +201,7 @@ public:
   static unsigned int s_queries;
   static unsigned int s_outgoingtimeouts;
   static unsigned int s_throttledqueries;
+  static unsigned int s_dontqueries;
   static unsigned int s_outqueries;
   static unsigned int s_tcpoutqueries;
   static unsigned int s_nodelegated;
@@ -223,9 +226,7 @@ public:
            >,
            composite_key_compare<CIStringCompare, std::less<QType> >
        >,
-       ordered_non_unique<
-           member<NegCacheEntry, uint32_t, &NegCacheEntry::d_ttd>
-       >
+       sequenced<> 
     >
   > negcache_t;
   
@@ -478,6 +479,30 @@ struct RecursorStats
   time_t startupTime;
 };
 
+//! represents a running TCP/IP client session
+class TCPConnection : public boost::noncopyable
+{
+public:
+  TCPConnection(int fd, const ComboAddress& addr);
+  ~TCPConnection();
+  
+  int getFD()
+  {
+    return d_fd;
+  }
+  enum stateenum {BYTE0, BYTE1, GETQUESTION, DONE} state;
+  int qlen;
+  int bytesread;
+  const ComboAddress d_remote;
+  char data[65535]; // damn
+
+  static unsigned int getCurrentConnections() { return s_currentConnections; }
+private:
+  const int d_fd;
+  static AtomicCounter s_currentConnections; //!< total number of current TCP connections
+};
+
+
 struct RemoteKeeper
 {
   typedef vector<ComboAddress> remotes_t;
@@ -512,6 +537,7 @@ ComboAddress parseIPAndPort(const std::string& input, uint16_t port);
 ComboAddress getQueryLocalAddress(int family, uint16_t port);
 typedef boost::function<void*(void)> pipefunc_t;
 void broadcastFunction(const pipefunc_t& func, bool skipSelf = false);
+void distributeAsyncFunction(const pipefunc_t& func);
 
 
 template<class T> T broadcastAccFunction(const boost::function<T*()>& func, bool skipSelf=false);
@@ -527,5 +553,6 @@ uint64_t* pleaseGetConcurrentQueries();
 uint64_t* pleaseGetThrottleSize();
 uint64_t* pleaseGetPacketCacheHits();
 uint64_t* pleaseGetPacketCacheSize();
+uint64_t* pleaseWipeCache(const std::string& canon);
 
 #endif

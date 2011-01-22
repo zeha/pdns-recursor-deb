@@ -16,7 +16,7 @@
     along with this program; if not, write to the Free Software
     Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
-// $Id: dns.hh 1478 2009-12-27 22:18:42Z ahu $ 
+// $Id: dns.hh 1554 2010-04-18 12:24:37Z ahu $ 
 /* (C) 2002 POWERDNS.COM BV */
 #ifndef DNS_HH
 #define DNS_HH
@@ -74,6 +74,7 @@ public:
   QType qtype; //!< qtype of this record, ie A, CNAME, MX etc
   uint16_t qclass; //!< class of this record
   string qname; //!< the name of this record, for example: www.powerdns.com
+  string wildcardname;
   string content; //!< what this record points to. Example: 10.1.2.3
   uint16_t priority; //!< For qtype's that support a priority or preference. Currently only MX
   uint32_t ttl; //!< Time To Live of this record
@@ -81,6 +82,8 @@ public:
   time_t last_modified; //!< For autocalculating SOA serial numbers - the backend needs to fill this in
   enum Place {QUESTION=0, ANSWER=1, AUTHORITY=2, ADDITIONAL=3}; //!< Type describing the positioning of a DNSResourceRecord within, say, a DNSPacket
   Place d_place; //!< This specifies where a record goes within the packet
+
+  bool auth;
 
   bool operator<(const DNSResourceRecord &b) const
   {

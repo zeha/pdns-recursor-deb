@@ -110,9 +110,31 @@ string doGetParameter(T begin, T end)
 }
 
 
+static uint64_t dumpNegCache(SyncRes::negcache_t& negcache, int fd)
+{
+  FILE* fp=fdopen(dup(fd), "w");
+  if(!fp) { // dup probably failed
+    return 0;
+  }
+  fprintf(fp, "; negcache dump from thread follows\n;\n");
+  time_t now = time(0);
+  
+  typedef SyncRes::negcache_t::nth_index<1>::type sequence_t;
+  sequence_t& sidx=negcache.get<1>();
+
+  uint64_t count=0;
+  BOOST_FOREACH(const NegCacheEntry& neg, sidx)
+  {
+    ++count;
+    fprintf(fp, "%s IN %s %d VIA %s\n", neg.d_name.c_str(), neg.d_qtype.getName().c_str(), (unsigned int) (neg.d_ttd - now), neg.d_qname.c_str());
+  }
+  fclose(fp);
+  return count;
+}
+
 static uint64_t* pleaseDump(int fd)
 {
-  return new uint64_t(t_RC->doDump(fd));
+  return new uint64_t(t_RC->doDump(fd) + dumpNegCache(t_sstorage->negcache, fd));
 }
 
 template<typename T>
@@ -155,7 +177,7 @@ string doDumpEDNSStatus(T begin, T end)
   return "done\n";
 }
 
-static uint64_t* pleaseWipeCache(const std::string& canon)
+uint64_t* pleaseWipeCache(const std::string& canon)
 {
   return new uint64_t(t_RC->doWipeCache(canon));
 }
@@ -390,9 +412,11 @@ RecursorControlParser::RecursorControlParser()
   addGetStat("all-outqueries", &SyncRes::s_outqueries);
   addGetStat("ipv6-outqueries", &g_stats.ipv6queries);
   addGetStat("throttled-outqueries", &SyncRes::s_throttledqueries);
+  addGetStat("dont-outqueries", &SyncRes::s_dontqueries);
   addGetStat("throttled-out", &SyncRes::s_throttledqueries);
   addGetStat("unreachables", &SyncRes::s_unreachables);
   addGetStat("chain-resends", &g_stats.chainResends);
+  addGetStat("tcp-clients", boost::bind(TCPConnection::getCurrentConnections));
 
   addGetStat("edns-ping-matches", &g_stats.ednsPingMatches);
   addGetStat("edns-ping-mismatches", &g_stats.ednsPingMismatches);

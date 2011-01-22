@@ -112,12 +112,14 @@ union ComboAddress {
   {
     memset(&sin6, 0, sizeof(sin6));
     sin4.sin_family = AF_INET;
-    sin4.sin_port=htons(port);
+    
     if(!IpToU32(str, (uint32_t*)&sin4.sin_addr.s_addr)) {
       sin6.sin6_family = AF_INET6;
-      if(Utility::inet_pton(AF_INET6, str.c_str(), &sin6.sin6_addr) <= 0)
+      if(makeIPv6sockaddr(str, &sin6) < 0)
         throw AhuException("Unable to convert presentation address '"+ str +"'"); 
+      
     }
+    sin4.sin_port=htons(port);
   }
 
   bool isMappedIPv4()  const
@@ -186,7 +188,7 @@ inline ComboAddress makeComboAddress(const string& str)
   address.sin4.sin_family=AF_INET;
   if(Utility::inet_pton(AF_INET, str.c_str(), &address.sin4.sin_addr) <= 0) {
     address.sin4.sin_family=AF_INET6;
-    if(Utility::inet_pton(AF_INET6, str.c_str(), &address.sin6.sin6_addr) <= 0)
+    if(makeIPv6sockaddr(str, &address.sin6) < 0)
       throw NetmaskException("Unable to convert '"+str+"' to a netmask");        
   }
   return address;
