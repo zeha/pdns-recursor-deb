@@ -3,8 +3,9 @@ pdns-recursor (3.3-1) unstable; urgency=low
   * New upstream release.
   * Now my name is spelled correctly.
   * Update Standards-Version to 3.9.1
+  * Update the recursor.conf and include new configuration parameters.
 
- -- Matthijs Möhlmann <matthijs@cacholong.nl>  Sat, 22 Jan 2011 15:48:18 +0100
+ -- Matthijs Möhlmann <matthijs@cacholong.nl>  Sat, 22 Jan 2011 16:39:02 +0100
 
 pdns-recursor (3.2-4) unstable; urgency=high
 
