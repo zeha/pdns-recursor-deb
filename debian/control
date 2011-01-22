@@ -21,8 +21,9 @@ Description: PowerDNS recursor
  resolve queries about other domains.
 
 Package: pdns-recursor-dbg
+Section: debug
 Architecture: any
-Depends: pdns-recursor (= ${binary:Version})
+Depends: pdns-recursor (= ${binary:Version}), ${misc:Depends}
 Description: debugging symbols for PowerDNS recursor
  PowerDNS is a versatile nameserver which supports a large number
  of different backends ranging from simple zonefiles to relational
