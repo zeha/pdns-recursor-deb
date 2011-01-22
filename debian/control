@@ -20,3 +20,14 @@ Description: PowerDNS recursor
  This is the recursive nameserver that goes out to the internet and
  resolve queries about other domains.
 
+Package: pdns-recursor-dbg
+Architecture: any
+Depends: pdns-recursor (= ${binary:Version})
+Description: debugging symbols for PowerDNS recursor
+ PowerDNS is a versatile nameserver which supports a large number
+ of different backends ranging from simple zonefiles to relational
+ databases and load balancing/failover algorithms.
+ PowerDNS tries to emphasize speed and security.
+ .
+ This package contains debugging symbols for PowerDNS to assist in
+ debugging, such as with gdb. It is not required for normal operation.

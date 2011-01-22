@@ -71,7 +71,7 @@ binary-arch: build install
 	dh_installlogcheck -a
 	dh_installinit -a --error-handler=initscript_error -- defaults 19 85
 	dh_link -a
-	dh_strip -a
+	dh_strip -a --dbg-package=pdns-recursor-dbg
 	dh_compress -a
 	dh_fixperms -a
 	dh_installdeb -a
