@@ -1,6 +1,7 @@
 pdns-recursor (3.3-1) unstable; urgency=low
 
   * New upstream release. (Closes: #565052)
+  * Init loop is fixed in pdns (Closes: #594805)
   * Now my name is spelled correctly.
   * Update Standards-Version to 3.9.1
   * Update the recursor.conf and include new configuration parameters.
