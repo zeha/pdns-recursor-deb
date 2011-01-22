@@ -19,7 +19,7 @@
 #ifndef QTYPE_HH
 #define QTYPE_HH
 /* (C) 2002 POWERDNS.COM BV */
-// $Id: qtype.hh 1472 2009-12-24 16:57:03Z ahu $
+// $Id: qtype.hh 1709 2010-09-11 10:13:25Z ahu $
 #include <string>
 #include <vector>
 #include <utility>
@@ -74,8 +74,8 @@ public:
 // more solaris fun
 #undef DS   
   enum typeenum {A=1,NS=2,CNAME=5,SOA=6, MR=9, PTR=12,HINFO=13,MX=15,TXT=16,RP=17,AFSDB=18,KEY=25,AAAA=28,LOC=29,SRV=33,NAPTR=35, KX=36, 
-        	 CERT=37,OPT=41, DS=43, SSHDP=44, IPSECKEY=45, RRSIG=46, NSEC=47, DNSKEY=48, DHCID=49, 
-        	 SPF=99, TSIG=250, AXFR=252, IXFR=251, ANY=255, URL=256, MBOXFW=257, CURL=258, ADDR=259} types;
+		 CERT=37,OPT=41, DS=43, SSHDP=44, IPSECKEY=45, RRSIG=46, NSEC=47, DNSKEY=48, DHCID=49, NSEC3=50, NSEC3PARAM=51,
+		 SPF=99, TSIG=250, AXFR=252, IXFR=251, ANY=255, URL=256, MBOXFW=257, CURL=258, ADDR=259} types;
   typedef pair<string,int> namenum; 
   static vector<namenum> names;
 private:
@@ -86,5 +86,8 @@ private:
   static bool uninit;
 };
 
-
+struct QClass
+{
+	enum QClassEnum {IN=1, CHAOS=3};
+};
 #endif

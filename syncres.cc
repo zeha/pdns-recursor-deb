@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2003 - 2009  PowerDNS.COM BV
+    Copyright (C) 2003 - 2010  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 as published 
@@ -36,6 +36,7 @@
 #include "dnsparser.hh"
 #include "dns_random.hh"
 #include "lock.hh"
+#include "cachecleaner.hh"
 
 __thread SyncRes::StaticStorage* t_sstorage;
 
@@ -48,6 +49,7 @@ unsigned int SyncRes::s_outgoingtimeouts;
 unsigned int SyncRes::s_outqueries;
 unsigned int SyncRes::s_tcpoutqueries;
 unsigned int SyncRes::s_throttledqueries;
+unsigned int SyncRes::s_dontqueries;
 unsigned int SyncRes::s_nodelegated;
 unsigned int SyncRes::s_unreachables;
 bool SyncRes::s_doIPv6;
@@ -74,6 +76,10 @@ SyncRes::SyncRes(const struct timeval& now) :  d_outqueries(0), d_tcpoutqueries(
 int SyncRes::beginResolve(const string &qname, const QType &qtype, uint16_t qclass, vector<DNSResourceRecord>&ret)
 {
   s_queries++;
+  
+  if( (qtype.getCode() == QType::AXFR)) 
+    return -1;
+  
   if( (qtype.getCode()==QType::PTR && pdns_iequals(qname, "1.0.0.127.in-addr.arpa.")) ||
       (qtype.getCode()==QType::A && qname.length()==10 && pdns_iequals(qname, "localhost."))) {
     ret.clear();
@@ -424,11 +430,13 @@ int SyncRes::doResolve(const string &qname, const QType &qtype, vector<DNSResour
   return res<0 ? RCode::ServFail : res;
 }
 
+#if 0
 // for testing purpoises
 static bool ipv6First(const ComboAddress& a, const ComboAddress& b)
 {
   return !(a.sin4.sin_family < a.sin4.sin_family);
 }
+#endif
 
 /** This function explicitly goes out for A addresses, but if configured to use IPv6 as well, will also return any IPv6 addresses in the cache
     Additionally, it will return the 'best' address up front, and the rest shufled
@@ -644,14 +652,15 @@ bool SyncRes::doCacheCheck(const string &qname, const QType &qtype, vector<DNSRe
         giveNegative=true;
         sqname=ni->d_qname;
         sqt=QType::SOA;
+        moveCacheItemToBack(t_sstorage->negcache, ni);
         break;
       }
       else {
-        LOG<<prefix<<qname<<": Entire record '"<<qname<<"' was negatively cached, but entry expired"<<endl;
+        LOG<<prefix<<qname<<": Entire record '"<<qname<<"' or type was negatively cached, but entry expired"<<endl;
+        moveCacheItemToFront(t_sstorage->negcache, ni);
       }
     }
   }
-
 
   set<DNSResourceRecord> cset;
   bool found=false, expired=false;
@@ -860,6 +869,7 @@ int SyncRes::doResolveAt(set<string, CIStringCompare> nameservers, string auth, 
           } 
           else if(!pierceDontQuery && g_dontQuery && g_dontQuery->match(&*remoteIP)) {
             LOG<<prefix<<qname<<": not sending query to " << remoteIP->toString() << ", blocked by 'dont-query' setting" << endl;
+            s_dontqueries++;
             continue;
           }
           else {
@@ -999,16 +1009,19 @@ int SyncRes::doResolveAt(set<string, CIStringCompare> nameservers, string auth, 
       bool done=false, realreferral=false, negindic=false;
       string newauth, soaname, newtarget;
 
-      for(LWResult::res_t::const_iterator i=lwr.d_result.begin();i!=lwr.d_result.end();++i) {
+      for(LWResult::res_t::iterator i=lwr.d_result.begin();i!=lwr.d_result.end();++i) {
         if(i->d_place==DNSResourceRecord::AUTHORITY && dottedEndsOn(qname,i->qname) && i->qtype.getCode()==QType::SOA && 
            lwr.d_rcode==RCode::NXDomain) {
           LOG<<prefix<<qname<<": got negative caching indication for RECORD '"<<qname+"'"<<endl;
+          i->ttl = min(i->ttl, s_maxnegttl);
           ret.push_back(*i);
 
           NegCacheEntry ne;
 
           ne.d_qname=i->qname;
-          ne.d_ttd=d_now.tv_sec + min(i->ttl, s_maxnegttl); // controversial
+          
+          ne.d_ttd=d_now.tv_sec + i->ttl;
+	  
           ne.d_name=qname;
           ne.d_qtype=QType(0); // this encodes 'whole record'
           
@@ -1046,18 +1059,23 @@ int SyncRes::doResolveAt(set<string, CIStringCompare> nameservers, string auth, 
         else if(!done && i->d_place==DNSResourceRecord::AUTHORITY && dottedEndsOn(qname,i->qname) && i->qtype.getCode()==QType::SOA && 
            lwr.d_rcode==RCode::NoError) {
           LOG<<prefix<<qname<<": got negative caching indication for '"<< (qname+"|"+i->qtype.getName()+"'") <<endl;
-          if(!newtarget.empty())
-            ret.push_back(*i);
           
-          NegCacheEntry ne;
-          ne.d_qname=i->qname;
-          ne.d_ttd=d_now.tv_sec + min(s_maxnegttl, i->ttl);
-          ne.d_name=qname;
-          ne.d_qtype=qtype;
-          if(qtype.getCode()) {  // prevents us from blacking out a whole domain
-            replacing_insert(t_sstorage->negcache, ne);
+          if(!newtarget.empty()) {
+            LOG<<prefix<<qname<<": Hang on! Got a redirect to '"<<newtarget<<"' already"<<endl;
           }
-          negindic=true;
+          else {
+            i-> ttl = min(s_maxnegttl, i->ttl);
+            ret.push_back(*i);
+            NegCacheEntry ne;
+            ne.d_qname=i->qname;
+            ne.d_ttd=d_now.tv_sec + i->ttl;
+            ne.d_name=qname;
+            ne.d_qtype=qtype;
+            if(qtype.getCode()) {  // prevents us from blacking out a whole domain
+              replacing_insert(t_sstorage->negcache, ne);
+            }
+            negindic=true;
+          }
         }
       }
 

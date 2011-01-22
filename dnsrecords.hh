@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2005 - 2007  PowerDNS.COM BV
+    Copyright (C) 2005 - 2010  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 as 
@@ -24,6 +24,7 @@
 #include "rcpgenerator.hh"
 #include <boost/lexical_cast.hpp>
 #include <set>
+#include <bitset>
 
 using namespace std;
 #include "namespaces.hh"
@@ -227,21 +228,26 @@ private:
 class DNSKEYRecordContent : public DNSRecordContent
 {
 public:
+  DNSKEYRecordContent();
   includeboilerplate(DNSKEY)
+  uint16_t getTag();
+  string getExponent() const;
+  string getModulus() const;
 
-private:
   uint16_t d_flags;
   uint8_t d_protocol;
   uint8_t d_algorithm;
   string d_key;
+private:
+  void getExpLen(uint16_t& startPos, uint16_t& expLen) const;
 };
 
 class DSRecordContent : public DNSRecordContent
 {
 public:
+  DSRecordContent();
   includeboilerplate(DS)
 
-private:
   uint16_t d_tag;
   uint8_t d_algorithm, d_digesttype;
   string d_digest;
@@ -293,9 +299,9 @@ private:
 class RRSIGRecordContent : public DNSRecordContent
 {
 public:
+  RRSIGRecordContent(); 
   includeboilerplate(RRSIG)
 
-private:
   uint16_t d_type;
   uint8_t d_algorithm, d_labels;
   uint32_t d_originalttl, d_sigexpire, d_siginception;
@@ -328,14 +334,6 @@ public:
   struct soatimes d_st;
 };
 
-class HIPRecordContent : public DNSRecordContent
-{
-public:
-  includeboilerplate(HIP)
-  HIPRecordContent(uint8_t algorithm, const string& hit, const string& key);
-};
-
-
 class NSECRecordContent : public DNSRecordContent
 {
 public:
@@ -352,6 +350,52 @@ public:
   std::set<uint16_t> d_set;
 private:
 };
+
+class NSEC3RecordContent : public DNSRecordContent
+{
+public:
+  static void report(void);
+  NSEC3RecordContent() : DNSRecordContent(50)
+  {}
+  NSEC3RecordContent(const string& content, const string& zone="");
+
+  static DNSRecordContent* make(const DNSRecord &dr, PacketReader& pr);
+  static DNSRecordContent* make(const string& content);
+  string getZoneRepresentation() const;
+  void toPacket(DNSPacketWriter& pw);
+
+  uint8_t d_algorithm, d_flags;
+  uint16_t d_iterations;
+  uint8_t d_saltlength;
+  string d_salt;
+  uint8_t d_nexthashlength;
+  string d_nexthash;
+  std::set<uint16_t> d_set;
+
+private:
+};
+
+
+class NSEC3PARAMRecordContent : public DNSRecordContent
+{
+public:
+  static void report(void);
+  NSEC3PARAMRecordContent() : DNSRecordContent(51)
+  {}
+  NSEC3PARAMRecordContent(const string& content, const string& zone="");
+
+  static DNSRecordContent* make(const DNSRecord &dr, PacketReader& pr);
+  static DNSRecordContent* make(const string& content);
+  string getZoneRepresentation() const;
+  void toPacket(DNSPacketWriter& pw);
+
+
+  uint8_t d_algorithm, d_flags;
+  uint16_t d_iterations;
+  uint8_t d_saltlength;
+  string d_salt;
+};
+
 
 class LOCRecordContent : public DNSRecordContent
 {
@@ -371,6 +415,26 @@ public:
   
 private:
 };
+
+
+class WKSRecordContent : public DNSRecordContent
+{
+public:
+  static void report(void);
+  WKSRecordContent() : DNSRecordContent(ns_t_wks)
+  {}
+  WKSRecordContent(const string& content, const string& zone="");
+
+  static DNSRecordContent* make(const DNSRecord &dr, PacketReader& pr);
+  static DNSRecordContent* make(const string& content);
+  string getZoneRepresentation() const;
+  void toPacket(DNSPacketWriter& pw);
+
+  uint32_t d_ip;
+  std::bitset<65535> d_services;
+private:
+};
+
 
 class URLRecordContent : public DNSRecordContent // Fake, 'fancy record' with type 256
 {

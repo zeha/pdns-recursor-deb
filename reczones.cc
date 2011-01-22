@@ -35,9 +35,10 @@ void primeHints(void)
         		     "192.36.148.17","192.58.128.30", "193.0.14.129", "199.7.83.42", "202.12.27.33"};
     static const char *ip6s[]={
       "2001:503:ba3e::2:30", NULL, NULL, NULL, NULL,
-      "2001:500:2f::f", NULL, "2001:500:1::803f:235", NULL,
-      "2001:503:c27::2:30", NULL, NULL, NULL
+      "2001:500:2f::f", NULL, "2001:500:1::803f:235", "2001:7fe::53",
+      "2001:503:c27::2:30", "2001:7fd::1", "2001:500:3::42", "2001:dc3::35"
     };
+    
     DNSResourceRecord arr, aaaarr, nsrr;
     arr.qtype=QType::A;
     aaaarr.qtype=QType::AAAA;
@@ -212,12 +213,6 @@ void convertServersForAD(const std::string& input, SyncRes::AuthDomain& ad, cons
     L<<endl;
 }
 
-void* pleaseWipeCache(const std::string& qname)
-{
-  t_RC->doWipeCache(qname); 
-  return 0;
-}
-
 void* pleaseWipeNegCache()
 {
   t_sstorage->negcache.clear();   
@@ -239,7 +234,7 @@ string reloadAuthAndForwards()
   
     for(SyncRes::domainmap_t::const_iterator i = t_sstorage->domainmap->begin(); i != t_sstorage->domainmap->end(); ++i) {
       for(SyncRes::AuthDomain::records_t::const_iterator j = i->second.d_records.begin(); j != i->second.d_records.end(); ++j) 
-	broadcastFunction(boost::bind(pleaseWipeCache, j->qname));
+	broadcastAccFunction<uint64_t>(boost::bind(pleaseWipeCache, j->qname));
     }
 
     string configname=::arg()["config-dir"]+"/recursor.conf";
@@ -258,7 +253,7 @@ string reloadAuthAndForwards()
     // purge again - new zones need to blank out the cache
     for(SyncRes::domainmap_t::const_iterator i = newDomainMap->begin(); i != newDomainMap->end(); ++i) {
       for(SyncRes::AuthDomain::records_t::const_iterator j = i->second.d_records.begin(); j != i->second.d_records.end(); ++j) 
-	broadcastFunction(boost::bind(pleaseWipeCache, j->qname));
+	broadcastAccFunction<uint64_t>(boost::bind(pleaseWipeCache, j->qname));
     }
 
     // this is pretty blunt
@@ -308,11 +303,11 @@ SyncRes::domainmap_t* parseAuthAndForwards()
             rr=String2DNSRR(rr.qname, rr.qtype, tmp, rr.ttl);
           }
           catch(std::exception &e) {
-	    delete newMap;
+            delete newMap;
             throw AhuException("Error parsing record '"+rr.qname+"' of type "+rr.qtype.getName()+" in zone '"+headers.first+"' from file '"+headers.second+"': "+e.what());
           }
           catch(...) {
-	    delete newMap;
+            delete newMap;
             throw AhuException("Error parsing record '"+rr.qname+"' of type "+rr.qtype.getName()+" in zone '"+headers.first+"' from file '"+headers.second+"'");
           }
 
@@ -350,10 +345,10 @@ SyncRes::domainmap_t* parseAuthAndForwards()
 
     shared_ptr<FILE> fp=shared_ptr<FILE>(rfp, fclose);
     
-    char line[1024];
+    string line;
     int linenum=0;
     uint64_t before = newMap->size();
-    while(linenum++, fgets(line, sizeof(line)-1, fp.get())) {
+    while(linenum++, stringfgets(fp.get(), line)) {
       string domain, instructions;
       tie(domain, instructions)=splitField(line, '=');
       trim(domain);

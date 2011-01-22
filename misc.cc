@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2002 - 2006  PowerDNS.COM BV
+    Copyright (C) 2002 - 2010  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
@@ -620,4 +620,80 @@ string stripDot(const string& dom)
     return dom;
 
   return dom.substr(0,dom.size()-1);
+}
+
+
+string labelReverse(const std::string& qname)
+{
+  if(qname.empty())
+    return qname;
+
+  bool dotName = qname.find('.') != string::npos;
+
+  vector<string> labels;
+  stringtok(labels, qname, ". ");
+  if(labels.size()==1)
+    return qname;
+
+  string ret;  // vv const_reverse_iter http://gcc.gnu.org/bugzilla/show_bug.cgi?id=11729
+  for(vector<string>::reverse_iterator iter = labels.rbegin(); iter != labels.rend(); ++iter) {
+    if(iter != labels.rbegin())
+      ret.append(1, dotName ? ' ' : '.');
+    ret+=*iter;
+  }
+  return ret;
+}
+
+// do NOT feed trailing dots!
+// www.powerdns.com, powerdns.com -> www
+string makeRelative(const std::string& fqdn, const std::string& zone)
+{
+  if(zone.empty())
+    return fqdn;  
+  if(fqdn != zone)
+    return fqdn.substr(0, fqdn.size() - zone.length() - 1); // strip domain name
+  return "";
+}
+
+string dotConcat(const std::string& a, const std::string &b)
+{
+  if(a.empty() || b.empty())
+    return a+b;
+  else 
+    return a+"."+b;
+}
+
+int makeIPv6sockaddr(const std::string& addr, struct sockaddr_in6* ret)
+{
+  struct addrinfo* res;
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  
+  hints.ai_family = AF_INET6;
+  hints.ai_flags = AI_NUMERICHOST;
+  
+  if(getaddrinfo(addr.c_str(), 0, &hints, &res) < 0) {
+    perror("getaddrinfo");
+    return -1;
+  }
+  
+  memcpy(ret, res->ai_addr, sizeof(*ret));
+  
+  freeaddrinfo(res);
+  return 0;
+}
+
+//! read a line of text from a FILE* to a std::string, returns false on 'no data'
+bool stringfgets(FILE* fp, std::string& line)
+{
+  char buffer[1024];
+  line.clear();
+  
+  do {
+    if(!fgets(buffer, sizeof(buffer), fp))
+      return !line.empty();
+    
+    line.append(buffer); 
+  } while(!strchr(buffer, '\n'));
+  return true;
 }

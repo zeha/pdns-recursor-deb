@@ -1,42 +1,58 @@
+'\" t
 .\"     Title: rec_control
-.\"    Author: 
-.\" Generator: DocBook XSL Stylesheets v1.73.2 <http://docbook.sf.net/>
-.\"      Date: 09/22/2009
-.\"    Manual: 
-.\"    Source: 
+.\"    Author: [see the "AUTHOR" section]
+.\" Generator: DocBook XSL Stylesheets v1.75.1 <http://docbook.sf.net/>
+.\"      Date: 08/30/2010
+.\"    Manual: [FIXME: manual]
+.\"    Source: [FIXME: source]
+.\"  Language: English
 .\"
-.TH "REC_CONTROL" "1" "09/22/2009" "" ""
+.TH "REC_CONTROL" "1" "08/30/2010" "[FIXME: source]" "[FIXME: manual]"
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
 .\" disable hyphenation
 .nh
 .\" disable justification (adjust text to left margin only)
 .ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
 .SH "NAME"
 rec_control \- control pdns_recursor
 .SH "SYNOPSIS"
-\fIrec_control\fR [\-\-help] [\-\-socket\-dir] [\-\-socket\-pid] command \&.\&.
 .sp
+\fIrec_control\fR [\-\-help] [\-\-socket\-dir] [\-\-socket\-pid] command \&.\&.
 .SH "DESCRIPTION"
+.sp
 rec_control(1) allows the operator to control a running instance of the pdns_recursor\&.
 .sp
-The commands that can be passed to the recursor are described on http://doc\&.powerdns\&.com/rec\-control\&.html
-.sp
+The commands that can be passed to the recursor are described on \m[blue]\fBhttp://doc\&.powerdns\&.com/rec\-control\&.html\fR\m[]
 .SH "EXAMPLES"
+.sp
 To stop the recursor by hand, run:
 .sp
-.sp
+.if n \{\
 .RS 4
+.\}
 .nf
 # rec_control quit
 .fi
+.if n \{\
 .RE
+.\}
+.sp
 To dump the cache to disk, execute:
 .sp
-.sp
+.if n \{\
 .RS 4
+.\}
 .nf
 # rec_control dump\-cache /tmp/the\-cache
 .fi
+.if n \{\
 .RE
+.\}
 .SH "OPTIONS"
 .PP
 \-\-help
@@ -67,7 +83,13 @@ Dumps the entire cache to the filename mentioned\&. This file should not exist a
 .PP
 get statistic
 .RS 4
-Retrieve a statistic\&. For items that can be queried, see http://doc\&.powerdns\&.com/recursor\-stats\&.html
+Retrieve a statistic\&. For items that can be queried, see
+\m[blue]\fBhttp://doc\&.powerdns\&.com/recursor\-stats\&.html\fR\m[]
+.RE
+.PP
+get\-all
+.RS 4
+Retrieve all known statistics\&.
 .RE
 .PP
 ping
@@ -95,23 +117,29 @@ queries, which defaults to 0\&.
 wipe\-cache domain0 [domain1]
 .RS 4
 Wipe entries from the cache\&. This is useful if, for example, an important server has a new IP address, but the TTL has not yet expired\&. Multiple domain names can be passed\&. Note that you must terminate a domain with a \&.! So to wipe powerdns\&.org, issue
-\fIrec_control wipe\-cache powerdns\&.org\&.\fR\&. Versions beyond 3\&.1 don\'t need the trailing dot\&. Consider not only wiping
+\fIrec_control wipe\-cache powerdns\&.org\&.\fR\&. Versions beyond 3\&.1 don\(cqt need the trailing dot\&. Consider not only wiping
 \fIwww\&.domain\&.com\&.\fR
 but also
 \fIdomain\&.com\&.\fR, as the cached nameservers or target of CNAME may continue to be undesired\&.
 .RE
 .SH "BUGS"
-None known\&. File new ones at http://wiki\&.powerdns\&.com\&.
 .sp
+None known\&. File new ones at \m[blue]\fBhttp://wiki\&.powerdns\&.com\fR\m[]\&.
 .SH "AUTHOR"
-Written by PowerDNS\&.COM BV, bert hubert, <bert\&.hubert@netherlabs\&.nl>
 .sp
+Written by PowerDNS\&.COM BV, bert hubert, <\m[blue]\fBbert\&.hubert@netherlabs\&.nl\fR\m[]\&\s-2\u[1]\d\s+2>
 .SH "RESOURCES"
-Website: http://wiki\&.powerdns\&.com, http://www\&.powerdns\&.com
 .sp
+Website: \m[blue]\fBhttp://wiki\&.powerdns\&.com\fR\m[], \m[blue]\fBhttp://www\&.powerdns\&.com\fR\m[]
 .SH "SEE ALSO"
+.sp
 pdns_recursor(1)
-.sp
 .SH "COPYING"
-Copyright \(co 2006 PowerDNS\&.COM BV\&. Free use of this software is granted under the terms of the GNU General Public License (GPL) version 2\&.
 .sp
+Copyright \(co 2006 PowerDNS\&.COM BV\&. Free use of this software is granted under the terms of the GNU General Public License (GPL) version 2\&.
+.SH "NOTES"
+.IP " 1." 4
+bert.hubert@netherlabs.nl
+.RS 4
+\%mailto:bert.hubert@netherlabs.nl
+.RE
