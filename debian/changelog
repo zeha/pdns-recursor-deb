@@ -1,3 +1,9 @@
+pdns-recursor (3.3-2) unstable; urgency=low
+
+  * Fix my name in the init script and debian/control too.
+
+ -- Matthijs Möhlmann <matthijs@cacholong.nl>  Thu, 10 Feb 2011 17:05:17 +0100
+
 pdns-recursor (3.3-1) unstable; urgency=low
 
   * New upstream release. (Closes: #565052)
