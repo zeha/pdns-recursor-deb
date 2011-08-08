@@ -1,8 +1,10 @@
 pdns-recursor (3.3-2) unstable; urgency=low
 
   * Fix my name in the init script and debian/control too.
+  * Update Standards-Version to 3.9.2
+  * Use new build system dh instead of individual dh_* commands.
 
- -- Matthijs Möhlmann <matthijs@cacholong.nl>  Thu, 10 Feb 2011 17:05:17 +0100
+ -- Matthijs Möhlmann <matthijs@cacholong.nl>  Mon, 08 Aug 2011 11:56:58 +0200
 
 pdns-recursor (3.3-1) unstable; urgency=low
 
