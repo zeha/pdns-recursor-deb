@@ -1,0 +1,29 @@
+Debian packaging of PowerDNS
+============================
+
+This is the git repository for the PowerDNS recursor. Unfortunately,
+the packaging has not yet been committed here. Please refer to the
+Debian package pool for what we currently have.
+
+
+
+
+
+The pkg-pdns Alioth project contains three git repositories. One of
+then is visible on the Alioth web page (containing this README file),
+the two others are in use.
+
+git://git.debian.org/pkg-pdns/pkg-pdns.git
+http://git.debian.org/?p=pkg-pdns/pkg-pdns.git
+git+ssh://developername@git.debian.org/git/pkg-pdns/pkg-pdns.git
+  - this README file
+
+git://git.debian.org/pkg-pdns/pdns.git
+http://git.debian.org/?p=pkg-pdns/pdns.git
+git+ssh://developername@git.debian.org/git/pkg-pdns/pdns.git
+  - the authoritative PowerDNS server
+
+git://git.debian.org/pkg-pdns/pdns-recursor.git
+http://git.debian.org/?p=pkg-pdns/pdns-recursor.git
+git+ssh://developername@git.debian.org/git/pkg-pdns/pdns-recursor.git
+  - the PowerDNS recursor
