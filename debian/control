@@ -10,7 +10,7 @@ Vcs-Browser: http://git.debian.org/?p=pkg-pdns/pdns-recursor.git
 Homepage: http://www.powerdns.com/
 
 Package: pdns-recursor
-Architecture: any
+Architecture: amd64 hurd-i386 i386 ia64 kfreebsd-amd64 kfreebsd-i386 mips mipsel powerpc s390 s390x sparc
 Depends: ${shlibs:Depends}, ${misc:Depends}, lsb-base (>= 3.0-6), adduser
 Replaces: pdns
 Recommends: pdns-doc
@@ -25,7 +25,7 @@ Description: PowerDNS recursor
 
 Package: pdns-recursor-dbg
 Section: debug
-Architecture: any
+Architecture: amd64 hurd-i386 i386 ia64 kfreebsd-amd64 kfreebsd-i386 mips mipsel powerpc s390 s390x sparc
 Depends: pdns-recursor (= ${binary:Version}), ${misc:Depends}
 Description: debugging symbols for PowerDNS recursor
  PowerDNS is a versatile nameserver which supports a large number
