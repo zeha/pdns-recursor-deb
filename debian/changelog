@@ -1,6 +1,13 @@
-pdns-recursor (3.3-2.0) UNRELEASED; urgency=low
+pdns-recursor (3.3-3) unstable; urgency=low
 
-  * NOT YET RELEASED
+  * new maintainer team
+  * new Vcs links
+  * add Homepage
+  * debhelper 9 (enable hardening) (Closes: 656859)
+  * prepare new version
+  * set unapply-patches
+  * set Architecture to "all but arm{el,hf}" (Closes: 661959)
+  * Standards-Version: 3.9.3 (no changes necessary)
 
  -- Marc Haber <mh+debian-packages@zugschlus.de>  Mon, 18 Jun 2012 14:45:50 +0000
 
