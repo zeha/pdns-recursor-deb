@@ -2,3 +2,4 @@ do-not-strip-binaries
 kfreebsd-ftbfs-patch
 pdns-recursor-less-chatty
 hurd-ftbfs-patch
+remove-pdns_hw-patch

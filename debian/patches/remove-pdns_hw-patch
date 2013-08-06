@@ -1,0 +1,11 @@
+--- a/Makefile
++++ b/Makefile
+@@ -93,7 +93,7 @@
+ 	-rm -f dep *~ *.gcda *.gcno optional/*.gcda optional/*.gcno
+ 
+ binclean:
+-	-rm -f *.o  pdns_recursor rec_control optional/*.o
++	-rm -f *.o pdns_hw pdns_recursor rec_control optional/*.o
+ 	
+ dep:
+ 	$(CXX) $(CXXFLAGS) -MM -MG *.cc *.c *.hh > $@
