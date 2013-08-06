@@ -1,8 +1,6 @@
-Index: b/Makefile
-===================================================================
 --- a/Makefile
 +++ b/Makefile
-@@ -71,10 +71,10 @@
+@@ -73,10 +73,10 @@
  install: all
  	-mkdir -p $(DESTDIR)/$(SBINDIR)
  	mv pdns_recursor $(DESTDIR)/$(SBINDIR)

@@ -1,22 +1,18 @@
-Index: b/misc.cc
-===================================================================
---- a/misc.cc	2010-07-20 13:42:34.000000000 +0200
-+++ b/misc.cc	2010-07-20 13:56:57.000000000 +0200
-@@ -393,6 +393,9 @@
- #ifdef WIN32
- # define MAXHOSTNAMELEN 1025
+--- a/misc.cc
++++ b/misc.cc
+@@ -25,6 +25,9 @@
+ #include <netinet/in.h>
+ #include <unistd.h>
  #endif // WIN32
 +#ifndef MAXHOSTNAMELEN
 +# define MAXHOSTNAMELEN 255
 +#endif
  
-   char tmp[MAXHOSTNAMELEN];
-   if(gethostname(tmp, MAXHOSTNAMELEN))
-Index: b/Makefile
-===================================================================
---- a/Makefile	2010-07-20 14:07:21.000000000 +0200
-+++ b/Makefile	2010-07-20 14:07:53.000000000 +0200
-@@ -31,6 +31,9 @@
+ #include "misc.hh"
+ #include <vector>
+--- a/Makefile
++++ b/Makefile
+@@ -33,6 +33,9 @@
  ifeq ($(shell uname),GNU/kFreeBSD)
  	-include sysdeps/FreeBSD.inc
  endif

@@ -1,8 +1,6 @@
-Index: b/Makefile
-===================================================================
 --- a/Makefile
 +++ b/Makefile
-@@ -28,6 +28,9 @@
+@@ -30,6 +30,9 @@
  
  # OS specific instructions
  -include sysdeps/$(shell uname).inc
@@ -12,8 +10,6 @@ Index: b/Makefile
  
  ifeq ($(LUA), 1)
  	LUALIBS=$(LUA_LIBS_CONFIG)
-Index: b/kqueuemplexer.cc
-===================================================================
 --- a/kqueuemplexer.cc
 +++ b/kqueuemplexer.cc
 @@ -6,7 +6,7 @@
