@@ -1,12 +1,11 @@
 #include "dnswriter.hh"
 #include "misc.hh"
 #include "dnsparser.hh"
-#include <boost/tokenizer.hpp>
-#include <boost/algorithm/string.hpp>
+#include <boost/foreach.hpp>
 #include <limits.h>
 
 DNSPacketWriter::DNSPacketWriter(vector<uint8_t>& content, const string& qname, uint16_t  qtype, uint16_t qclass, uint8_t opcode)
-  : d_pos(0), d_content(content), d_qname(qname), d_qtype(qtype), d_qclass(qclass), d_canonic(false)
+  : d_pos(0), d_content(content), d_qname(qname), d_qtype(qtype), d_qclass(qclass), d_canonic(false), d_lowerCase(false)
 {
   d_content.clear();
   dnsheader dnsheader;
@@ -107,7 +106,7 @@ void DNSPacketWriter::addOpt(int udpsize, int extRCode, int Z, const vector<pair
 void DNSPacketWriter::xfr48BitInt(uint64_t val)
 {
   unsigned char bytes[6];
-  uint16_t theLeft = htons(val >> 32);
+  uint16_t theLeft = htons((val >> 32)&0xffffU);
   uint32_t theRight = htonl(val & 0xffffffffU);
   memcpy(bytes, (void*)&theLeft, 2);
   memcpy(bytes+2, (void*)&theRight, 4);
@@ -135,30 +134,26 @@ void DNSPacketWriter::xfr8BitInt(uint8_t val)
   d_record.push_back(val);
 }
 
+
+/* input: 
+  "" -> 0
+  "blah" -> 4blah
+  "blah" "blah" -> output 4blah4blah
+  "verylongstringlongerthan256....characters" \xffverylongstring\x23characters (autosplit)
+  "blah\"blah" -> 9blah"blah
+  "blah\97" -> 5blahb
+  */
 void DNSPacketWriter::xfrText(const string& text, bool)
 {
-  using boost::escaped_list_separator;
-  using boost::tokenizer;
-
-  escaped_list_separator<char> sep('\\', ' ' , '"');
-  tokenizer<escaped_list_separator<char> > tok(text, sep);
-
-  tokenizer<escaped_list_separator<char> >::iterator beg=tok.begin();
-
-  if(beg==tok.end()) {
+  if(text.empty()) {
     d_record.push_back(0);
+    return;
   }
-  else 
-    for(; beg!=tok.end(); ++beg){
-      if(beg->empty()) 
-        d_record.push_back(0);
-      else 
-        for (unsigned int i = 0; i < beg->length(); i += 0xff){
-          d_record.push_back(min((string::size_type)0xffU, beg->length()-i));
-          const uint8_t* ptr=(uint8_t*)(beg->c_str()) + i;
-          d_record.insert(d_record.end(), ptr, ptr+min((string::size_type)0xffU, beg->length()-i));
-        }
-    }
+  vector<string> segments = segmentDNSText(text);
+  BOOST_FOREACH(const string& str, segments) {
+    d_record.push_back(str.length());
+    d_record.insert(d_record.end(), str.c_str(), str.c_str() + str.length());
+  }
 }
 
 DNSPacketWriter::lmap_t::iterator find(DNSPacketWriter::lmap_t& lmap, const string& label)
@@ -197,8 +192,9 @@ bool labeltokUnescape(labelparts_t& parts, const string& label)
 }
 
 // this is the absolute hottest function in the pdns recursor 
-void DNSPacketWriter::xfrLabel(const string& label, bool compress)
+void DNSPacketWriter::xfrLabel(const string& Label, bool compress)
 {
+  string label = d_lowerCase ? toLower(Label) : Label;
   labelparts_t parts;
 
   if(d_canonic)
@@ -209,7 +205,6 @@ void DNSPacketWriter::xfrLabel(const string& label, bool compress)
     d_record.push_back(0);
     return;
   }
-
   bool unescaped=labeltokUnescape(parts, label); 
   
   // d_stuff is amount of stuff that is yet to be written out - the dnsrecordheader for example
@@ -243,6 +238,7 @@ void DNSPacketWriter::xfrLabel(const string& label, bool compress)
     if(unescaped) {
       string part(label.c_str() + i -> first, i->second - i->first);
       boost::replace_all(part, "\\.", ".");
+      boost::replace_all(part, "\\032", " ");
       boost::replace_all(part, "\\\\", "\\"); 
       if(part.size() > 255)
           throw MOADNSException("DNSPacketWriter::xfrLabel() tried to write an overly large label");
@@ -254,7 +250,10 @@ void DNSPacketWriter::xfrLabel(const string& label, bool compress)
       pos+=(part.size())+1;        		 
     }
     else {
-      d_record.push_back((char)(i->second - i->first));
+      char labelsize=(char)(i->second - i->first);
+      if(!labelsize) // empty label in the middle of name
+        throw MOADNSException("DNSPacketWriter::xfrLabel() found empty label in the middle of name");
+      d_record.push_back(labelsize);
       unsigned int len=d_record.size();
       d_record.resize(len + i->second - i->first);
       memcpy(((&*d_record.begin()) + len), label.c_str() + i-> first, i->second - i->first);
@@ -269,22 +268,20 @@ void DNSPacketWriter::xfrLabel(const string& label, bool compress)
 void DNSPacketWriter::xfrBlob(const string& blob, int  )
 {
   const uint8_t* ptr=reinterpret_cast<const uint8_t*>(blob.c_str());
-
   d_record.insert(d_record.end(), ptr, ptr+blob.size());
 }
 
-void DNSPacketWriter::xfrHexBlob(const string& blob)
+void DNSPacketWriter::xfrHexBlob(const string& blob, bool keepReading)
 {
   xfrBlob(blob);
 }
-
 
 void DNSPacketWriter::getRecords(string& records)
 {
   records.assign(d_content.begin() + d_sor, d_content.end());
 }
 
-uint16_t DNSPacketWriter::size()
+uint32_t DNSPacketWriter::size()
 {
   return d_content.size() + d_stuff + d_record.size();
 }

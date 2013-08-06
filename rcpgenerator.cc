@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2005 - 2007 PowerDNS.COM BV
+    Copyright (C) 2005 - 2011 PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 as 
@@ -147,6 +147,7 @@ void RecordTextReader::xfr8BitInt(uint8_t &val)
     throw RecordTextException("Overflow reading 8 bit integer from record content"); // fixme improve
 }
 
+// this code should leave all the escapes around 
 void RecordTextReader::xfrLabel(string& val, bool) 
 {
   skipSpaces();
@@ -158,13 +159,9 @@ void RecordTextReader::xfrLabel(string& val, bool)
   while(d_pos < d_end) {
     if(strptr[d_pos]!='\r' && dns_isspace(strptr[d_pos]))
       break;
-
-    if(strptr[d_pos]=='\\' && d_pos < d_end - 1 && strptr[d_pos+1]!='.')  // leave the \. escape around
-      d_pos++;
-
+      
     d_pos++;
   }
-
   val.append(strptr+begin_pos, strptr+d_pos);      
 
   if(val.empty())
@@ -223,23 +220,38 @@ static inline uint8_t hextodec(uint8_t val)
 }
 
 
-void HEXDecode(const char* begin, const char* end, string& val)
+void HEXDecode(const char* begin, const char* end, string& out)
 {
-  if((end - begin)%2)
-    throw RecordTextException("Hexadecimal blob with odd number of characters");
-
-  int limit=(int)(end-begin)/2;
-  val.resize(limit);
-  for(int n=0; n < limit; ++n) {
-    val[n] = hextodec(begin[2*n])*16 + hextodec(begin[2*n+1]); 
+  if(end - begin == 1 && *begin=='-') {
+    out.clear();
+    return;
   }
+  out.clear();
+  out.reserve((end-begin)/2);
+  uint8_t mode=0, val=0;
+  for(; begin != end; ++begin) {
+    if(!isalnum(*begin))
+      continue;
+    if(mode==0) {
+      val = 16*hextodec(*begin);
+      mode=1;
+    } else {
+      val += hextodec(*begin); 
+      out.append(1, (char) val);
+      mode = 0;
+      val = 0;
+    }
+  }
+  if(mode)
+    out.append(1, (char) val);
+
 }
 
-void RecordTextReader::xfrHexBlob(string& val)
+void RecordTextReader::xfrHexBlob(string& val, bool keepReading)
 {
   skipSpaces();
   int pos=(int)d_pos;
-  while(d_pos < d_end && !dns_isspace(d_string[d_pos]))
+  while(d_pos < d_end && (keepReading || !dns_isspace(d_string[d_pos])))
     d_pos++;
 
   HEXDecode(d_string.c_str()+pos, d_string.c_str() + d_pos, val);
@@ -425,24 +437,13 @@ void RecordTextWriter::xfr8BitInt(const uint8_t& val)
   xfr32BitInt(val);
 }
 
-
+// should not mess with the escapes
 void RecordTextWriter::xfrLabel(const string& val, bool)
 {
   if(!d_string.empty())
     d_string.append(1,' ');
-  if(val.find(' ')==string::npos) 
-    d_string+=val;
-  else {
-    d_string.reserve(d_string.size()+val.size()+3);
-    for(string::size_type pos=0; pos < val.size() ; ++pos)
-      if(dns_isspace(val[pos]))
-        d_string+="\\ ";
-      else if(val[pos]=='\\')
-        d_string.append(1,'\\');
-      else
-        d_string.append(1,val[pos]);
-  }
-  //  d_string.append(1,'.');
+  
+  d_string+=val;
 }
 
 void RecordTextWriter::xfrBlob(const string& val, int)
@@ -453,10 +454,15 @@ void RecordTextWriter::xfrBlob(const string& val, int)
   d_string+=Base64Encode(val);
 }
 
-void RecordTextWriter::xfrHexBlob(const string& val)
+void RecordTextWriter::xfrHexBlob(const string& val, bool)
 {
   if(!d_string.empty())
     d_string.append(1,' ');
+
+  if(val.empty()) {
+    d_string.append(1,'-');
+    return;
+  }
 
   string::size_type limit=val.size();
   char tmp[5];

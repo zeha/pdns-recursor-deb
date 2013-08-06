@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2003 - 2010  PowerDNS.COM BV
+    Copyright (C) 2003 - 2013  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 
@@ -26,7 +26,7 @@
 #endif // WIN32
 
 #include <boost/foreach.hpp>
-
+#include "json_ws.hh"
 #include <pthread.h>
 #include "recpacketcache.hh"
 #include "utility.hh" 
@@ -64,7 +64,7 @@
 #include "iputils.hh"
 #include "mplexer.hh"
 #include "config.h"
-#include "lua-pdns-recursor.hh"
+#include "lua-recursor.hh"
 
 #ifndef RECURSOR
 #include "statbag.hh"
@@ -76,8 +76,9 @@ __thread unsigned int t_id;
 unsigned int g_maxTCPPerClient;
 unsigned int g_networkTimeoutMsec;
 bool g_logCommonErrors;
-__thread shared_ptr<PowerDNSLua>* t_pdl;
+__thread shared_ptr<RecursorLua>* t_pdl;
 __thread RemoteKeeper* t_remotes;
+__thread shared_ptr<Regex>* t_traceRegex;
 
 RecursorControlChannel s_rcc; // only active in thread 0
 
@@ -120,7 +121,7 @@ __thread MT_t* MT; // the big MTasker
 
 unsigned int g_numThreads;
 
-#define LOCAL_NETS "127.0.0.0/8, 10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12, ::1/128, fe80::/10"
+#define LOCAL_NETS "127.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 192.168.0.0/16, 172.16.0.0/12, ::1/128, fe80::/10"
 
 //! used to send information to a newborn mthread
 struct DNSComboWriter {
@@ -323,13 +324,15 @@ public:
   static int makeClientSocket(int family)
   {
     int ret=(int)socket(family, SOCK_DGRAM, 0);
+
     if(ret < 0 && errno==EMFILE) // this is not a catastrophic error
       return ret;
     
     if(ret<0) 
-      throw AhuException("Making a socket for resolver: "+stringerror());
+      throw AhuException("Making a socket for resolver (family =)"+lexical_cast<string>(family)+"): "+stringerror());
 
-    
+    Utility::setCloseOnExec(ret);
+
     int tries=10;
     while(--tries) {
       uint16_t port;
@@ -441,7 +444,7 @@ int arecvfrom(char *data, int len, int flags, const ComboAddress& fromaddr, int 
 string s_pidfname;
 static void writePid(void)
 {
-  ofstream of(s_pidfname.c_str(), ios_base::app);
+  ofstream of(s_pidfname.c_str(), std::ios_base::app);
   if(of)
     of<< Utility::getpid() <<endl;
   else
@@ -450,7 +453,6 @@ static void writePid(void)
 
 typedef map<ComboAddress, uint32_t, ComboAddress::addressOnlyLessThan> tcpClientCounts_t;
 tcpClientCounts_t __thread* t_tcpClientCounts;
-
 
 TCPConnection::TCPConnection(int fd, const ComboAddress& addr) : d_remote(addr), d_fd(fd)
 { 
@@ -488,12 +490,15 @@ void updateRcodeStats(int res)
 void startDoResolve(void *p)
 {
   DNSComboWriter* dc=(DNSComboWriter *)p;
+  string loginfo="";
 
   try {
-    uint16_t maxudpsize=512;
+    loginfo=" (while setting loginfo)";
+    loginfo=" ("+dc->d_mdp.d_qname+"/"+lexical_cast<string>(dc->d_mdp.d_qtype)+" from "+(dc->d_remote.toString())+")";
+    uint32_t maxanswersize= dc->d_tcp ? 65535 : 512;
     EDNSOpts edo;
     if(getEDNSOpts(dc->d_mdp, &edo)) {
-      maxudpsize=max(edo.d_packetsize, (uint16_t)1280);
+      maxanswersize = min(edo.d_packetsize, (uint16_t) (dc->d_tcp ? 65535 : 1680));
     }
     
     vector<DNSResourceRecord> ret;
@@ -509,8 +514,14 @@ void startDoResolve(void *p)
     pw.getHeader()->rd=dc->d_mdp.d_header.rd;
 
     SyncRes sr(dc->d_now);
-    if(!g_quiet)
-      L<<Logger::Error<<t_id<<" ["<<MT->getTid()<<"] " << (dc->d_tcp ? "TCP " : "") << "question for '"<<dc->d_mdp.d_qname<<"|"
+    bool tracedQuery=false; // we could consider letting Lua know about this too
+    if(t_traceRegex->get() && (*t_traceRegex)->match(dc->d_mdp.d_qname)) {
+      sr.setLogMode(SyncRes::Store);
+      tracedQuery=true;
+    }
+    
+    if(!g_quiet || tracedQuery)
+      L<<Logger::Warning<<t_id<<" ["<<MT->getTid()<<"] " << (dc->d_tcp ? "TCP " : "") << "question for '"<<dc->d_mdp.d_qname<<"|"
        <<DNSRecordContent::NumberToType(dc->d_mdp.d_qtype)<<"' from "<<dc->getRemote()<<endl;
 
     sr.setId(MT->getTid());
@@ -520,18 +531,42 @@ void startDoResolve(void *p)
     int res;
 
     bool variableAnswer = false;
-    // if there is a PowerDNSLua active, and it 'took' the query in preResolve, we don't launch beginResolve
+    // if there is a RecursorLua active, and it 'took' the query in preResolve, we don't launch beginResolve
     if(!t_pdl->get() || !(*t_pdl)->preresolve(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer)) {
        res = sr.beginResolve(dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), dc->d_mdp.d_qclass, ret);
 
       if(t_pdl->get()) {
-        if(res == RCode::NXDomain)
+        if(res == RCode::NoError) {
+      	  vector<DNSResourceRecord>::const_iterator i;
+      	  for(i=ret.begin(); i!=ret.end(); ++i) 
+    	      if(i->qtype.getCode() == dc->d_mdp.d_qtype && i->d_place == DNSResourceRecord::ANSWER)
+          		break;
+      	  if(i == ret.end())
+      	    (*t_pdl)->nodata(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
+      	}
+      	else if(res == RCode::NXDomain)
           (*t_pdl)->nxdomain(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
+      
+      (*t_pdl)->postresolve(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
       }
     }
     
-    uint32_t minTTL=numeric_limits<uint32_t>::max();
-    if(res<0) {
+    uint32_t minTTL=std::numeric_limits<uint32_t>::max();
+      
+    if(tracedQuery || res < 0 || res == RCode::ServFail || pw.getHeader()->rcode == RCode::ServFail)
+    {
+      string trace(sr.getTrace());
+      if(!trace.empty()) {
+        vector<string> lines;
+        boost::split(lines, trace, boost::is_any_of("\n"));
+        BOOST_FOREACH(const string& line, lines) {
+          if(!line.empty())
+            L<<Logger::Warning<< line << endl;
+        }
+      }
+    }
+
+    if(res < 0) {
       pw.getHeader()->rcode=RCode::ServFail;
       // no commit here, because no record
       g_stats.servFails++;
@@ -539,9 +574,9 @@ void startDoResolve(void *p)
     else {
       pw.getHeader()->rcode=res;
       updateRcodeStats(res);
-    
+      
       if(ret.size()) {
-        shuffle(ret);
+        orderAndShuffle(ret);
         
         for(vector<DNSResourceRecord>::const_iterator i=ret.begin(); i!=ret.end(); ++i) {
           pw.startRecord(i->qname, i->qtype.getCode(), i->ttl, i->qclass, (DNSPacketWriter::Place)i->d_place); 
@@ -554,7 +589,7 @@ void startDoResolve(void *p)
             shared_ptr<DNSRecordContent> drc(DNSRecordContent::mastermake(i->qtype.getCode(), i->qclass, i->content)); 
             drc->toPacket(pw);
           }
-          if(!dc->d_tcp && pw.size() > maxudpsize) {
+          if(pw.size() > maxanswersize) {
             pw.rollback();
             if(i->d_place==DNSResourceRecord::ANSWER)  // only truncate if we actually omitted parts of the answer
               pw.getHeader()->tc=1;
@@ -639,25 +674,30 @@ void startDoResolve(void *p)
     dc=0;
   }
   catch(AhuException &ae) {
-    L<<Logger::Error<<"startDoResolve problem: "<<ae.reason<<endl;
+    L<<Logger::Error<<"startDoResolve problem"<<loginfo<<": "<<ae.reason<<endl;
     delete dc;
   }
   catch(MOADNSException& e) {
-    L<<Logger::Error<<"DNS parser error: "<<dc->d_mdp.d_qname<<", "<<e.what()<<endl;
+    L<<Logger::Error<<"DNS parser error"<<loginfo<<": "<<dc->d_mdp.d_qname<<", "<<e.what()<<endl;
     delete dc;
   }
   catch(std::exception& e) {
-    L<<Logger::Error<<"STL error: "<<e.what()<<endl;
+    L<<Logger::Error<<"STL error"<<loginfo<<": "<<e.what()<<endl;
     delete dc;
   }
   catch(...) {
-    L<<Logger::Error<<"Any other exception in a resolver context"<<endl;
+    L<<Logger::Error<<"Any other exception in a resolver context"<<loginfo<<endl;
   }
+  
+  g_stats.maxMThreadStackUsage = max(MT->getMaxStackUsage(), g_stats.maxMThreadStackUsage);
 }
 
-void makeControlChannelSocket()
+void makeControlChannelSocket(int processNum=-1)
 {
-  string sockname=::arg()["socket-dir"]+"/pdns_recursor.controlsocket";
+  string sockname=::arg()["socket-dir"]+"/pdns_recursor";
+  if(processNum >= 0)
+    sockname += "."+lexical_cast<string>(processNum);
+  sockname+=".controlsocket";
   s_rcc.listen(sockname);
   
 #ifndef WIN32
@@ -798,6 +838,8 @@ void handleNewTCPQuestion(int fd, FDMultiplexer::funcparam_t& )
 string* doProcessUDPQuestion(const std::string& question, const ComboAddress& fromaddr, int fd)
 {
   ++g_stats.qcounter;
+  if(fromaddr.sin4.sin_family==AF_INET6)
+     g_stats.ipv6qcounter++;
 
   string response;
   try {
@@ -810,8 +852,11 @@ string* doProcessUDPQuestion(const std::string& question, const ComboAddress& fr
       SyncRes::s_queries++;
       ageDNSPacket(response, age);
       sendto(fd, response.c_str(), response.length(), 0, (struct sockaddr*) &fromaddr, fromaddr.getSocklen());
-      if(response.length() >= sizeof(struct dnsheader))
-	updateRcodeStats(((struct dnsheader*)response.c_str())->rcode);
+      if(response.length() >= sizeof(struct dnsheader)) {
+        struct dnsheader dh;
+        memcpy(&dh, response.c_str(), sizeof(dh));
+        updateRcodeStats(dh.rcode);
+      }
       g_stats.avgLatencyUsec=(uint64_t)((1-0.0001)*g_stats.avgLatencyUsec + 0); // we assume 0 usec
       return 0;
     }
@@ -910,6 +955,8 @@ void makeTCPServerSockets()
     }
 
     fd=socket(sin.sin6.sin6_family, SOCK_STREAM, 0);
+    Utility::setCloseOnExec(fd);
+
     if(fd<0) 
       throw AhuException("Making a TCP server socket for resolver: "+stringerror());
 
@@ -974,6 +1021,7 @@ void makeUDPServerSockets()
     }
     
     int fd=socket(sin.sin4.sin_family, SOCK_DGRAM, 0);
+    Utility::setCloseOnExec(fd);
 
     if(fd < 0) {
       throw AhuException("Making a UDP server socket for resolver: "+netstringerror());
@@ -1028,7 +1076,7 @@ void usr1Handler(int)
 
 void usr2Handler(int)
 {
-  SyncRes::setLog(true);
+  SyncRes::setDefaultLogMode(SyncRes::Log);
   g_quiet=false;
   ::arg().set("quiet")="no";
 
@@ -1283,6 +1331,7 @@ void handleRCC(int fd, FDMultiplexer::funcparam_t& var)
   string msg=s_rcc.recv(&remote);
   RecursorControlParser rcp;
   RecursorControlParser::func_t* command;
+  
   string answer=rcp.getAnswer(msg, &command);
   try {
     s_rcc.send(answer, &remote);
@@ -1379,7 +1428,7 @@ void handleUDPServerResponse(int fd, FDMultiplexer::funcparam_t& var)
     else {
       g_stats.serverParseError++; 
       if(g_logCommonErrors)
-        L<<Logger::Error<<"Unable to parse packet from remote UDP server "<< sockAddrToString((struct sockaddr_in*) &fromaddr) <<
+        L<<Logger::Error<<"Unable to parse packet from remote UDP server "<< fromaddr.toString() <<
           ": packet smalller than DNS header"<<endl;
     }
 
@@ -1397,62 +1446,65 @@ void handleUDPServerResponse(int fd, FDMultiplexer::funcparam_t& var)
   dnsheader dh;
   memcpy(&dh, data, sizeof(dh));
   
-  if(dh.qr) {
-    PacketID pident;
-    pident.remote=fromaddr;
-    pident.id=dh.id;
-    pident.fd=fd;
-    if(!dh.qdcount) { // UPC, Nominum, very old BIND on FormErr, NSD
-      pident.domain.clear();
-      pident.type = 0;
-    }
-    else {
-      try {
-        pident.domain=questionExpand(data, len, pident.type); // don't copy this from above - we need to do the actual read
-      }
-      catch(std::exception& e) {
-        g_stats.serverParseError++; // won't be fed to lwres.cc, so we have to increment
-        L<<Logger::Warning<<"Error in packet from "<<sockAddrToString((struct sockaddr_in*) &fromaddr) << ": "<<e.what() << endl;
-        return;
-      }
-    }
-    string packet;
-    packet.assign(data, len);
+  PacketID pident;
+  pident.remote=fromaddr;
+  pident.id=dh.id;
+  pident.fd=fd;
 
-    MT_t::waiters_t::iterator iter=MT->d_waiters.find(pident);
-    if(iter != MT->d_waiters.end()) {
-      doResends(iter, pident, packet);
+  if(!dh.qr) {
+    L<<Logger::Warning<<"Not taking data from question on outgoing socket from "<< fromaddr.toStringWithPort()  <<endl;
+  }
+
+  if(!dh.qdcount || // UPC, Nominum, very old BIND on FormErr, NSD
+     !dh.qr) {      // one weird server
+    pident.domain.clear();
+    pident.type = 0;
+  }
+  else {
+    try {
+      pident.domain=questionExpand(data, len, pident.type); // don't copy this from above - we need to do the actual read
     }
-
-  retryWithName:
-
-    if(!MT->sendEvent(pident, &packet)) {
-      // we do a full scan for outstanding queries on unexpected answers. not too bad since we only accept them on the right port number, which is hard enough to guess
-      for(MT_t::waiters_t::iterator mthread=MT->d_waiters.begin(); mthread!=MT->d_waiters.end(); ++mthread) {
-        if(pident.fd==mthread->key.fd && mthread->key.remote==pident.remote &&  mthread->key.type == pident.type &&
-           pdns_iequals(pident.domain, mthread->key.domain)) {
-          mthread->key.nearMisses++;
-        }
-
-        // be a bit paranoid here since we're weakening our matching
-        if(pident.domain.empty() && !mthread->key.domain.empty() && !pident.type && mthread->key.type && 
-           pident.id  == mthread->key.id && mthread->key.remote == pident.remote) {
-          // cerr<<"Empty response, rest matches though, sending to a waiter"<<endl;
-          pident.domain = mthread->key.domain;
-          pident.type = mthread->key.type;
-          goto retryWithName; // note that this only passes on an error, lwres will still reject the packet
-        }
-      }
-      g_stats.unexpectedCount++; // if we made it here, it really is an unexpected answer
-      if(g_logCommonErrors)
-        L<<Logger::Warning<<"Discarding unexpected packet from "<<fromaddr.toStringWithPort()<<": "<<pident.domain<<", "<<pident.type<<endl;
-    }
-    else if(fd >= 0) {
-      t_udpclientsocks->returnSocket(fd);
+    catch(std::exception& e) {
+      g_stats.serverParseError++; // won't be fed to lwres.cc, so we have to increment
+      L<<Logger::Warning<<"Error in packet from "<< fromaddr.toStringWithPort() << ": "<<e.what() << endl;
+      return;
     }
   }
-  else
-    L<<Logger::Warning<<"Ignoring question on outgoing socket from "<< sockAddrToString((struct sockaddr_in*) &fromaddr)  <<endl;
+  string packet;
+  packet.assign(data, len);
+
+  MT_t::waiters_t::iterator iter=MT->d_waiters.find(pident);
+  if(iter != MT->d_waiters.end()) {
+    doResends(iter, pident, packet);
+  }
+
+retryWithName:
+
+  if(!MT->sendEvent(pident, &packet)) {
+    // we do a full scan for outstanding queries on unexpected answers. not too bad since we only accept them on the right port number, which is hard enough to guess
+    for(MT_t::waiters_t::iterator mthread=MT->d_waiters.begin(); mthread!=MT->d_waiters.end(); ++mthread) {
+      if(pident.fd==mthread->key.fd && mthread->key.remote==pident.remote &&  mthread->key.type == pident.type &&
+         pdns_iequals(pident.domain, mthread->key.domain)) {
+        mthread->key.nearMisses++;
+      }
+
+      // be a bit paranoid here since we're weakening our matching
+      if(pident.domain.empty() && !mthread->key.domain.empty() && !pident.type && mthread->key.type && 
+         pident.id  == mthread->key.id && mthread->key.remote == pident.remote) {
+        // cerr<<"Empty response, rest matches though, sending to a waiter"<<endl;
+        pident.domain = mthread->key.domain;
+        pident.type = mthread->key.type;
+        goto retryWithName; // note that this only passes on an error, lwres will still reject the packet
+      }
+    }
+    g_stats.unexpectedCount++; // if we made it here, it really is an unexpected answer
+    if(g_logCommonErrors) {
+      L<<Logger::Warning<<"Discarding unexpected packet from "<<fromaddr.toStringWithPort()<<": "<<pident.domain<<", "<<pident.type<<", "<<MT->d_waiters.size()<<" waiters"<<endl;
+    }
+  }
+  else if(fd >= 0) {
+    t_udpclientsocks->returnSocket(fd);
+  }
 }
 
 FDMultiplexer* getMultiplexer()
@@ -1476,24 +1528,26 @@ FDMultiplexer* getMultiplexer()
 }
 
   
-void* doReloadLuaScript()
+string* doReloadLuaScript()
 {
   string fname= ::arg()["lua-dns-script"];
   try {
     if(fname.empty()) {
       t_pdl->reset();
       L<<Logger::Error<<t_id<<" Unloaded current lua script"<<endl;
+      return new string("unloaded\n");
     }
     else {
-      *t_pdl = shared_ptr<PowerDNSLua>(new PowerDNSLua(fname));
+      *t_pdl = shared_ptr<RecursorLua>(new RecursorLua(fname));
     }
   }
   catch(std::exception& e) {
     L<<Logger::Error<<t_id<<" Retaining current script, error from '"<<fname<<"': "<< e.what() <<endl;
+    return new string("retaining current script, error from '"+fname+"': "+e.what()+"\n");
   }
     
   L<<Logger::Warning<<t_id<<" (Re)loaded lua script from '"<<fname<<"'"<<endl;
-  return 0;
+  return new string("(re)loaded '"+fname+"'\n");
 }
 
 string doQueueReloadLuaScript(vector<string>::const_iterator begin, vector<string>::const_iterator end)
@@ -1501,10 +1555,31 @@ string doQueueReloadLuaScript(vector<string>::const_iterator begin, vector<strin
   if(begin != end) 
     ::arg().set("lua-dns-script") = *begin;
   
-  broadcastFunction(doReloadLuaScript);
-  
-  return "ok, reload/unload queued\n";
+  return broadcastAccFunction<string>(doReloadLuaScript);
 }  
+
+string* pleaseUseNewTraceRegex(const std::string& newRegex)
+try
+{
+  if(newRegex.empty()) {
+    t_traceRegex->reset();
+    return new string("unset\n");
+  }
+  else {
+    (*t_traceRegex) = shared_ptr<Regex>(new Regex(newRegex));
+    return new string("ok\n");
+  }
+}
+catch(AhuException& ae)
+{
+  return new string(ae.reason+"\n");
+}
+
+string doTraceRegex(vector<string>::const_iterator begin, vector<string>::const_iterator end)
+{
+  return broadcastAccFunction<string>(boost::bind(pleaseUseNewTraceRegex, begin!=end ? *begin : ""));
+}
+
 
 void* recursorThread(void*);
 
@@ -1513,6 +1588,9 @@ void* pleaseSupplantACLs(NetmaskGroup *ng)
   t_allowFrom = ng;
   return 0;
 }
+
+int g_argc;
+char** g_argv;
 
 void parseACLs()
 {
@@ -1524,8 +1602,9 @@ void parseACLs()
     
     if(!::arg().preParseFile(configname.c_str(), "allow-from-file")) 
       L<<Logger::Warning<<"Unable to re-parse configuration file '"<<configname<<"'"<<endl;
-    
+    ::arg().preParse(g_argc, g_argv, "allow-from-file");
     ::arg().preParseFile(configname.c_str(), "allow-from", LOCAL_NETS);
+    ::arg().preParse(g_argc, g_argv, "allow-from");
   }
 
   NetmaskGroup* oldAllowFrom = t_allowFrom, *allowFrom=new NetmaskGroup;
@@ -1585,14 +1664,14 @@ int serviceMain(int argc, char*argv[])
   L.setLoglevel((Logger::Urgency)(6)); // info and up
 
   if(!::arg()["logging-facility"].empty()) {
-    boost::optional<int> val=logFacilityToLOG(::arg().asNum("logging-facility") );
-    if(val)
-      theL().setFacility(*val);
+    int val=logFacilityToLOG(::arg().asNum("logging-facility") );
+    if(val >= 0)
+      theL().setFacility(val);
     else
       L<<Logger::Error<<"Unknown logging facility "<<::arg().asNum("logging-facility") <<endl;
   }
 
-  L<<Logger::Warning<<"PowerDNS recursor "<<VERSION<<" (C) 2001-2010 PowerDNS.COM BV ("<<__DATE__", "__TIME__;
+  L<<Logger::Warning<<"PowerDNS recursor "<<VERSION<<" (C) 2001-2013 PowerDNS.COM BV ("<<__DATE__", "__TIME__;
 #ifdef __GNUC__
   L<<", gcc "__VERSION__;
 #endif // add other compilers here
@@ -1641,22 +1720,29 @@ int serviceMain(int argc, char*argv[])
       L<<Logger::Warning<<"PowerDNS Recursor itself will distribute queries over threads"<<endl;
   }
   
-  if(::arg().mustDo("trace")) {
-    SyncRes::setLog(true);
+  if(::arg()["trace"]=="fail") {
+    SyncRes::setDefaultLogMode(SyncRes::Store);
+  }
+  else if(::arg().mustDo("trace")) {
+    SyncRes::setDefaultLogMode(SyncRes::Log);
     ::arg().set("quiet")="no";
     g_quiet=false;
   }
+  
   
   try {
     vector<string> addrs;  
     if(!::arg()["query-local-address6"].empty()) {
       SyncRes::s_doIPv6=true;
-      L<<Logger::Error<<"Enabling IPv6 transport for outgoing queries"<<endl;
+      L<<Logger::Warning<<"Enabling IPv6 transport for outgoing queries"<<endl;
       
       stringtok(addrs, ::arg()["query-local-address6"], ", ;");
       BOOST_FOREACH(const string& addr, addrs) {
         g_localQueryAddresses6.push_back(ComboAddress(addr));
       }
+    }
+    else {
+      L<<Logger::Warning<<"NOT using IPv6 for outgoing queries - set 'query-local-address6=::' to enable"<<endl;
     }
     addrs.clear();
     stringtok(addrs, ::arg()["query-local-address"], ", ;");
@@ -1668,6 +1754,9 @@ int serviceMain(int argc, char*argv[])
     L<<Logger::Error<<"Assigning local query addresses: "<<e.what();
     exit(99);
   }
+
+  SyncRes::s_doAAAAAdditionalProcessing = ::arg().mustDo("aaaa-additional-processing");
+  SyncRes::s_doAdditionalProcessing = ::arg().mustDo("additional-processing") | SyncRes::s_doAAAAAdditionalProcessing;
   
   SyncRes::s_noEDNSPing = ::arg().mustDo("disable-edns-ping");
   SyncRes::s_noEDNS = ::arg().mustDo("disable-edns");
@@ -1695,7 +1784,8 @@ int serviceMain(int argc, char*argv[])
   makeUDPServerSockets();
   makeTCPServerSockets();
 
-  for(int forks = 0; forks < ::arg().asNum("processes") - 1; ++forks) {
+  int forks;
+  for(forks = 0; forks < ::arg().asNum("processes") - 1; ++forks) {
     if(!fork()) // we are child
       break;
   }
@@ -1715,7 +1805,7 @@ int serviceMain(int argc, char*argv[])
   signal(SIGPIPE,SIG_IGN);
   writePid();
 #endif
-  makeControlChannelSocket();
+  makeControlChannelSocket( ::arg().asNum("processes") > 1 ? forks : -1);
   
   int newgid=0;
   if(!::arg()["setgid"].empty())
@@ -1732,8 +1822,6 @@ int serviceMain(int argc, char*argv[])
   }
 
   Utility::dropPrivs(newuid, newgid);
-  
-  
   g_numThreads = ::arg().asNum("threads") + ::arg().mustDo("pdns-distributes-queries");
   
   makeThreadPipes();
@@ -1750,7 +1838,7 @@ int serviceMain(int argc, char*argv[])
     pthread_t tid;
     L<<Logger::Warning<<"Launching "<< g_numThreads <<" threads"<<endl;
     for(unsigned int n=0; n < g_numThreads; ++n) {
-      pthread_create(&tid, 0, recursorThread, (void*)n);
+      pthread_create(&tid, 0, recursorThread, (void*)(long)n);
     }
     void* res;
 
@@ -1775,12 +1863,11 @@ try
   
   L<<Logger::Warning<<"Done priming cache with root hints"<<endl;
     
-  t_RC->d_followRFC2181=::arg().mustDo("auth-can-lower-ttl");
-  t_pdl = new shared_ptr<PowerDNSLua>();
+  t_pdl = new shared_ptr<RecursorLua>();
   
   try {
     if(!::arg()["lua-dns-script"].empty()) {
-      *t_pdl = shared_ptr<PowerDNSLua>(new PowerDNSLua(::arg()["lua-dns-script"]));
+      *t_pdl = shared_ptr<RecursorLua>(new RecursorLua(::arg()["lua-dns-script"]));
       L<<Logger::Warning<<"Loaded 'lua' script from '"<<::arg()["lua-dns-script"]<<"'"<<endl;
     }
     
@@ -1789,6 +1876,9 @@ try
     L<<Logger::Error<<"Failed to load 'lua' script from '"<<::arg()["lua-dns-script"]<<"': "<<e.what()<<endl;
     exit(99);
   }
+  
+  t_traceRegex = new shared_ptr<Regex>();
+  
   
   t_remotes = new RemoteKeeper();
   t_remotes->remotes.resize(::arg().asNum("remotes-ringbuffer-entries") / g_numThreads); 
@@ -1802,8 +1892,13 @@ try
   PacketID pident;
 
   t_fdm=getMultiplexer();
-  if(!t_id) 
+  if(!t_id) {
+    if(::arg().mustDo("experimental-json-interface")) {
+      L<<Logger::Warning << "Enabling JSON interface" << endl;
+      new JWebserver(t_fdm);
+    }
     L<<Logger::Error<<"Enabled '"<< t_fdm->getName() << "' multiplexer"<<endl;
+  }
 
   t_fdm->addReadFD(g_pipes[t_id].readToThread, handlePipeRequest);
 
@@ -1900,8 +1995,11 @@ void doWindowsServiceArguments(RecursorService& recursor)
 
 int main(int argc, char **argv) 
 {
+  g_argc = argc;
+  g_argv = argv;
   g_stats.startupTime=time(0);
   reportBasicTypes();
+  reportOtherTypes();
 
   int ret = EXIT_SUCCESS;
 #ifdef WIN32
@@ -1918,10 +2016,11 @@ int main(int argc, char **argv)
     ::arg().set("soa-minimum-ttl","Don't change")="0";
     ::arg().set("soa-serial-offset","Don't change")="0";
     ::arg().set("no-shuffle","Don't change")="off";
+    ::arg().set("additional-processing","turn on to do additional processing")="off";
     ::arg().set("aaaa-additional-processing","turn on to do AAAA additional processing (slow)")="off";
     ::arg().set("local-port","port to listen on")="53";
     ::arg().set("local-address","IP addresses to listen on, separated by spaces or commas. Also accepts ports.")="127.0.0.1";
-    ::arg().set("trace","if we should output heaps of logging")="off";
+    ::arg().set("trace","if we should output heaps of logging. set to 'fail' to only log failing domains")="off";
     ::arg().set("daemon","Operate as a daemon")="yes";
     ::arg().set("log-common-errors","If we should log rather common errors")="yes";
     ::arg().set("chroot","switch to chroot jail")="";
@@ -1937,8 +2036,9 @@ int main(int argc, char **argv)
     ::arg().setSwitch( "ntservice", "Run as service" )= "no";
     ::arg().setSwitch( "use-ntlog", "Use the NT logging facilities" )= "yes"; 
     ::arg().setSwitch( "use-logfile", "Use a log file" )= "no"; 
-    ::arg().setSwitch( "logfile", "Filename of the log file" )= "recursor.log"; 
 #else
+    ::arg().set( "experimental-logfile", "Filename of the log file for JSON parser" )= "/var/log/pdns.log"; 
+    ::arg().setSwitch( "experimental-json-interface", "If we should run a JSON webserver") = "no";
     ::arg().set("quiet","Suppress logging of questions and answers")="";
     ::arg().set("logging-facility","Facility to log messages as. 0 corresponds to local0")="";
 #endif
@@ -1952,7 +2052,7 @@ int main(int argc, char **argv)
     ::arg().set("socket-dir","Where the controlsocket will live")=LOCALSTATEDIR;
     ::arg().set("delegation-only","Which domains we only accept delegations from")="";
     ::arg().set("query-local-address","Source IP address for sending queries")="0.0.0.0";
-    ::arg().set("query-local-address6","Source IPv6 address for sending queries")="";
+    ::arg().set("query-local-address6","Source IPv6 address for sending queries. IF UNSET, IPv6 WILL NOT BE USED FOR OUTGOING QUERIES")="";
     ::arg().set("client-tcp-timeout","Timeout in seconds when talking to TCP clients")="2";
     ::arg().set("max-mthreads", "Maximum number of simultaneous Mtasker threads")="2048";
     ::arg().set("max-tcp-clients","Maximum number of simultaneous TCP clients")="128";
@@ -1965,7 +2065,7 @@ int main(int argc, char **argv)
     ::arg().set("packetcache-servfail-ttl", "maximum number of seconds to keep a cached servfail entry in packetcache")="60";
     ::arg().set("server-id", "Returned when queried for 'server.id' TXT or NSID, defaults to hostname")="";
     ::arg().set("remotes-ringbuffer-entries", "maximum number of packets to store statistics for")="0";
-    ::arg().set("version-string", "string reported on version.pdns or version.bind")="PowerDNS Recursor "VERSION" $Id: pdns_recursor.cc 1712 2010-09-11 13:40:03Z ahu $";
+    ::arg().set("version-string", "string reported on version.pdns or version.bind")="PowerDNS Recursor "VERSION" $Id$";
     ::arg().set("allow-from", "If set, only allow these comma separated netmasks to recurse")=LOCAL_NETS;
     ::arg().set("allow-from-file", "If set, load allowed netmasks from this file")="";
     ::arg().set("entropy-source", "If set, read entropy from this file")="/dev/urandom";
@@ -1978,11 +2078,11 @@ int main(int argc, char **argv)
     ::arg().set("forward-zones-recurse", "Zones for which we forward queries with recursion bit, comma separated domain=ip pairs")="";
     ::arg().set("forward-zones-file", "File with (+)domain=ip pairs for forwarding")="";
     ::arg().set("export-etc-hosts", "If we should serve up contents from /etc/hosts")="off";
+    ::arg().set("export-etc-hosts-search-suffix", "Also serve up the contents of /etc/hosts with this suffix")="";
     ::arg().set("etc-hosts-file", "Path to 'hosts' file")="/etc/hosts";
     ::arg().set("serve-rfc1918", "If we should be authoritative for RFC 1918 private IP space")="";
-    ::arg().set("auth-can-lower-ttl", "If we follow RFC 2181 to the letter, an authoritative server can lower the TTL of NS records")="off";
     ::arg().set("lua-dns-script", "Filename containing an optional 'lua' script that will be used to modify dns answers")="";
-    ::arg().setSwitch( "ignore-rd-bit", "Assume each packet requires recursion, for compatability" )= "off"; 
+    ::arg().setSwitch( "ignore-rd-bit", "Assume each packet requires recursion, for compatibility" )= "off"; 
     ::arg().setSwitch( "disable-edns-ping", "Disable EDNSPing" )= "no"; 
     ::arg().setSwitch( "disable-edns", "Disable EDNS" )= ""; 
     ::arg().setSwitch( "disable-packetcache", "Disable packetcache" )= "no"; 

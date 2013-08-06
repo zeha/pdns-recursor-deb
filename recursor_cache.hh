@@ -25,7 +25,7 @@ using namespace ::boost::multi_index;
 class MemRecursorCache : public boost::noncopyable //  : public RecursorCache
 {
 public:
-  MemRecursorCache() : d_followRFC2181(false), d_cachecachevalid(false)
+  MemRecursorCache() : d_cachecachevalid(false)
   {
     cacheHits = cacheMisses = 0;
   }
@@ -38,10 +38,11 @@ public:
   void doPrune(void);
   void doSlash(int perc);
   uint64_t doDump(int fd);
+  uint64_t doDumpNSSpeeds(int fd);
+
   int doWipeCache(const string& name, uint16_t qtype=0xffff);
   bool doAgeCache(time_t now, const string& name, uint16_t qtype, int32_t newTTL);
   uint64_t cacheHits, cacheMisses;
-  bool d_followRFC2181;
 
 private:
   struct StoredRecord
@@ -57,7 +58,7 @@ private:
 
     unsigned int size() const
     {
-      return ( unsigned int ) 4+d_string.size();
+      return sizeof(*this) + d_string.size();
     }
 
   };
@@ -75,7 +76,7 @@ private:
       if(d_records.size()==1)
         return d_records.begin()->d_ttd;
 
-      uint32_t earliest=numeric_limits<uint32_t>::max();
+      uint32_t earliest=std::numeric_limits<uint32_t>::max();
       for(records_t::const_iterator i=d_records.begin(); i != d_records.end(); ++i)
         earliest=min(earliest, i->d_ttd);
       return earliest;

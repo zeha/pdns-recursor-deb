@@ -1,4 +1,5 @@
 #include <iostream>
+#include <boost/foreach.hpp>
 #include "recpacketcache.hh"
 #include "cachecleaner.hh"
 #include "dns.hh"
@@ -9,6 +10,28 @@
 RecursorPacketCache::RecursorPacketCache()
 {
   d_hits = d_misses = 0;
+}
+
+int RecursorPacketCache::doWipePacketCache(const string& name, uint16_t qtype)
+{
+  int count=0;
+  for(packetCache_t::iterator iter = d_packetCache.begin(); iter != d_packetCache.end();)
+  {
+    const struct dnsheader* packet = reinterpret_cast<const struct dnsheader*>((*iter).d_packet.c_str());
+    if (packet->qdcount > 0) 
+    {
+	// find out type
+	const struct dnsrecordheader *header = reinterpret_cast<const struct dnsrecordheader*>((*iter).d_packet.c_str()+sizeof(struct dnsheader));
+	uint16_t type = header->d_type;
+	std::string domain=questionExpand((*iter).d_packet.c_str(), (*iter).d_packet.size(), type); 	
+	if (pdns_iequals(name,domain)) 
+	{ 
+  	  iter = d_packetCache.erase(iter);
+	  count++;
+	} else iter++;
+    }
+  }
+  return count;
 }
 
 bool RecursorPacketCache::getResponsePacket(const std::string& queryPacket, time_t now, 
@@ -27,9 +50,10 @@ bool RecursorPacketCache::getResponsePacket(const std::string& queryPacket, time
   if((uint32_t)now < iter->d_ttd) { // it is fresh!
 //    cerr<<"Fresh for another "<<iter->d_ttd - now<<" seconds!"<<endl;
     *age = now - iter->d_creation;
-    uint16_t id = ((struct dnsheader*)queryPacket.c_str())->id;
+    uint16_t id;
+    memcpy(&id, queryPacket.c_str(), 2); 
     *responsePacket = iter->d_packet;
-    ((struct dnsheader*)responsePacket->c_str())->id=id;
+    responsePacket->replace(0, 2, (char*)&id, 2);
     d_hits++;
     moveCacheItemToBack(d_packetCache, iter);
 
@@ -61,6 +85,16 @@ uint64_t RecursorPacketCache::size()
 {
   return d_packetCache.size();
 }
+
+uint64_t RecursorPacketCache::bytes()
+{
+  uint64_t sum=0;
+  BOOST_FOREACH(const struct Entry& e, d_packetCache) {
+    sum += sizeof(e) + e.d_packet.length() + 4;
+  }
+  return sum;
+}
+
 
 void RecursorPacketCache::doPruneTo(unsigned int maxCached)
 {
