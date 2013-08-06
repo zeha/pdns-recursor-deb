@@ -1,12 +1,11 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2002-2009  PowerDNS.COM BV
+    Copyright (C) 2002-2012  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
     as published by the Free Software Foundation
     
-
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -21,7 +20,14 @@
 #include <inttypes.h>
 #include <cstring>
 #include <cstdio>
+#include <regex.h>
 #include <boost/algorithm/string.hpp>
+#include <boost/multi_index_container.hpp>
+#include <boost/multi_index/ordered_index.hpp>
+#include <boost/tuple/tuple_comparison.hpp>
+#include <boost/multi_index/key_extractors.hpp>
+#include <boost/multi_index/sequenced_index.hpp>
+using namespace ::boost::multi_index;
 #if 0
 #include <iostream>
 using std::cout;
@@ -61,9 +67,8 @@ struct TSCTimer
 #include <string>
 #include <ctype.h>
 #include <vector>
-#include <boost/optional.hpp>
 
-using namespace std;
+#include "namespaces.hh"
 bool chopOff(string &domain);
 bool chopOffDotted(string &domain);
 
@@ -72,38 +77,18 @@ bool dottedEndsOn(const string &domain, const string &suffix);
 string nowTime();
 const string unquotify(const string &item);
 string humanDuration(time_t passed);
-void chomp(string &line, const string &delim);
 bool stripDomainSuffix(string *qname, const string &domain);
 void stripLine(string &line);
 string getHostname();
 string urlEncode(const string &text);
 int waitForData(int fd, int seconds, int useconds=0);
+int waitFor2Data(int fd1, int fd2, int seconds, int useconds, int* fd);
 int waitForRWData(int fd, bool waitForRead, int seconds, int useconds);
 uint16_t getShort(const unsigned char *p);
 uint16_t getShort(const char *p);
 uint32_t getLong(const unsigned char *p);
 uint32_t getLong(const char *p);
-boost::optional<int> logFacilityToLOG(unsigned int facility);
-
-inline void putLong(unsigned char* p, uint32_t val)
-{
-  *p++=(val>>24)&0xff;
-  *p++=(val>>16)&0xff;
-  *p++=(val>>8)&0xff;
-  *p++=(val   )&0xff;
-
-}
-inline void putLong(char* p, uint32_t val)
-{
-  putLong((unsigned char *)p,val);
-}
-
-
-inline uint32_t getLong(unsigned char *p)
-{
-  return (p[0]<<24)+(p[1]<<16)+(p[2]<<8)+p[3];
-}
-
+int logFacilityToLOG(unsigned int facility);
 
 struct ServiceTuple
 {
@@ -198,6 +183,7 @@ public:
   time_t time();
   inline void set();  //!< Reset the timer
   inline int udiff(); //!< Return the number of microseconds since the timer was last set.
+  inline int udiffNoReset(); //!< Return the number of microseconds since the timer was last set.
   void setTimeval(const struct timeval& tv)
   {
     d_set=tv;
@@ -209,7 +195,7 @@ public:
 private:
   struct timeval d_set;
 };
-const string sockAddrToString(struct sockaddr_in *remote);
+
 int sendData(const char *buffer, int replen, int outsock);
 
 inline void DTime::set()
@@ -219,13 +205,20 @@ inline void DTime::set()
 
 inline int DTime::udiff()
 {
+  int res=udiffNoReset();
+  Utility::gettimeofday(&d_set,0);
+  return res;
+}
+
+inline int DTime::udiffNoReset()
+{
   struct timeval now;
 
   Utility::gettimeofday(&now,0);
   int ret=1000000*(now.tv_sec-d_set.tv_sec)+(now.tv_usec-d_set.tv_usec);
-  d_set=now;
   return ret;
 }
+
 
 inline bool dns_isspace(char c)
 {
@@ -296,6 +289,7 @@ inline void unixDie(const string &why)
 
 string makeHexDump(const string& str);
 void shuffle(vector<DNSResourceRecord>& rrs);
+void orderAndShuffle(vector<DNSResourceRecord>& rrs);
 
 void normalizeTV(struct timeval& tv);
 const struct timeval operator+(const struct timeval& lhs, const struct timeval& rhs);
@@ -401,13 +395,26 @@ private:
 };
 
 
-struct CIStringCompare: public binary_function<string, string, bool>  
+struct CIStringCompare: public std::binary_function<string, string, bool>  
 {
   bool operator()(const string& a, const string& b) const
   {
     return pdns_ilexicographical_compare(a, b);
   }
 };
+
+struct CIStringPairCompare: public std::binary_function<pair<string, uint16_t>, pair<string,uint16_t>, bool>  
+{
+  bool operator()(const pair<string, uint16_t>& a, const pair<string, uint16_t>& b) const
+  {
+    if(pdns_ilexicographical_compare(a.first, b.first))
+	return true;
+    if(pdns_ilexicographical_compare(b.first, a.first))
+	return false;
+    return a.second < b.second;
+  }
+};
+
 
 pair<string, string> splitField(const string& inp, char sepa);
 
@@ -444,5 +451,37 @@ string makeRelative(const std::string& fqdn, const std::string& zone);
 string labelReverse(const std::string& qname);
 std::string dotConcat(const std::string& a, const std::string &b);
 int makeIPv6sockaddr(const std::string& addr, struct sockaddr_in6* ret);
+int makeIPv4sockaddr(const string &str, struct sockaddr_in* ret);
 bool stringfgets(FILE* fp, std::string& line);
+
+template<typename Index>
+std::pair<typename Index::iterator,bool>
+replacing_insert(Index& i,const typename Index::value_type& x)
+{
+  std::pair<typename Index::iterator,bool> res=i.insert(x);
+  if(!res.second)res.second=i.replace(res.first,x);
+  return res;
+}
+
+/** very small regex wrapper */
+class Regex
+{
+public:
+  /** constructor that accepts the expression to regex */
+  Regex(const string &expr);
+  
+  ~Regex()
+  {
+    regfree(&d_preg);
+  }
+  /** call this to find out if 'line' matches your expression */
+  bool match(const string &line)
+  {
+    return regexec(&d_preg,line.c_str(),0,0,0)==0;
+  }
+  
+private:
+  regex_t d_preg;
+};
+
 #endif

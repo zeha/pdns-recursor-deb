@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2005 - 2010 PowerDNS.COM BV
+    Copyright (C) 2005 - 2011 PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 as 
@@ -47,7 +47,7 @@
     And we might be able to reverse 2 -> 3 as well
 */
     
-using namespace std;
+#include "namespaces.hh"
 #include "namespaces.hh"
 
 class MOADNSException : public runtime_error
@@ -64,8 +64,10 @@ class PacketReader
 {
 public:
   PacketReader(const vector<uint8_t>& content) 
-    : d_pos(0), d_content(content)
-  {}
+    : d_pos(0), d_startrecordpos(0), d_content(content)
+  {
+    d_recordlen = content.size();
+  }
 
   uint32_t get32BitInt();
   uint16_t get16BitInt();
@@ -119,7 +121,7 @@ public:
 
   void xfrBlob(string& blob);
   void xfrBlob(string& blob, int length);
-  void xfrHexBlob(string& blob);
+  void xfrHexBlob(string& blob, bool keepReading=false);
 
   static uint16_t get16BitInt(const vector<unsigned char>&content, uint16_t& pos);
   static void getLabelFromContent(const vector<uint8_t>& content, uint16_t& frompos, string& ret, int recurs);
@@ -135,7 +137,7 @@ public:
 
 private:
   uint16_t d_startrecordpos; // needed for getBlob later on
-  uint16_t d_recordlen;      // dito
+  uint16_t d_recordlen;      // ditto
   const vector<uint8_t>& d_content;
 };
 
@@ -150,13 +152,16 @@ public:
   virtual std::string getZoneRepresentation() const = 0;
   virtual ~DNSRecordContent() {}
   virtual void toPacket(DNSPacketWriter& pw)=0;
-  virtual string serialize(const string& qname, bool canonic=false) // it would rock if this were const, but it is too hard
+  virtual string serialize(const string& qname, bool canonic=false, bool lowerCase=false) // it would rock if this were const, but it is too hard
   {
     vector<uint8_t> packet;
     string empty;
     DNSPacketWriter pw(packet, empty, 1);
     if(canonic)
       pw.setCanonic(true);
+
+    if(lowerCase)
+      pw.setLowercase(true);
 
     pw.startRecord(qname, d_qtype);
     this->toPacket(pw);
@@ -184,7 +189,8 @@ public:
     if(z)
       getZmakermap()[make_pair(cl,ty)]=z;
 
-    getNamemap()[make_pair(cl,ty)]=name;
+    getT2Namemap().insert(make_pair(make_pair(cl,ty), name));
+    getN2Typemap().insert(make_pair(name, make_pair(cl,ty)));
   }
 
   static void unregist(uint16_t cl, uint16_t ty) 
@@ -196,19 +202,23 @@ public:
 
   static uint16_t TypeToNumber(const string& name)
   {
-    for(namemap_t::const_iterator i=getNamemap().begin(); i!=getNamemap().end();++i)
-      if(pdns_iequals(i->second, name))
-        return i->first.second;
-
+    n2typemap_t::const_iterator iter = getN2Typemap().find(toUpper(name));
+    if(iter != getN2Typemap().end())
+      return iter->second.second;
+    
+    if(boost::starts_with(name, "TYPE"))
+        return atoi(name.c_str()+4);
+    
     throw runtime_error("Unknown DNS type '"+name+"'");
   }
 
   static const string NumberToType(uint16_t num, uint16_t classnum=1)
   {
-    if(!getNamemap().count(make_pair(classnum,num)))
-      return "#" + lexical_cast<string>(num);
+    t2namemap_t::const_iterator iter = getT2Namemap().find(make_pair(classnum, num));
+    if(iter == getT2Namemap().end()) 
+      return "TYPE" + lexical_cast<string>(num);
       //      throw runtime_error("Unknown DNS type with numerical id "+lexical_cast<string>(num));
-    return getNamemap()[make_pair(classnum,num)];
+    return iter->second;
   }
 
   explicit DNSRecordContent(uint16_t type) : d_qtype(type)
@@ -229,10 +239,11 @@ public:
 protected:
   typedef std::map<std::pair<uint16_t, uint16_t>, makerfunc_t* > typemap_t;
   typedef std::map<std::pair<uint16_t, uint16_t>, zmakerfunc_t* > zmakermap_t;
-  typedef std::map<std::pair<uint16_t, uint16_t>, string > namemap_t;
-
+  typedef std::map<std::pair<uint16_t, uint16_t>, string > t2namemap_t;
+  typedef std::map<string, std::pair<uint16_t, uint16_t> > n2typemap_t;
   static typemap_t& getTypemap();
-  static namemap_t& getNamemap();
+  static t2namemap_t& getT2Namemap();
+  static n2typemap_t& getN2Typemap();
   static zmakermap_t& getZmakermap();
 };
 
@@ -298,7 +309,7 @@ public:
   dnsheader d_header;
   string d_qname;
   uint16_t d_qclass, d_qtype;
-  uint8_t d_rcode;
+  //uint8_t d_rcode;
 
   typedef vector<pair<DNSRecord, uint16_t > > answers_t;
   

@@ -26,7 +26,7 @@
 #include <set>
 #include <bitset>
 
-using namespace std;
+#include "namespaces.hh"
 #include "namespaces.hh"
 
 #define includeboilerplate(RNAME)   RNAME##RecordContent(const DNSRecord& dr, PacketReader& pr); \
@@ -231,15 +231,11 @@ public:
   DNSKEYRecordContent();
   includeboilerplate(DNSKEY)
   uint16_t getTag();
-  string getExponent() const;
-  string getModulus() const;
 
   uint16_t d_flags;
   uint8_t d_protocol;
   uint8_t d_algorithm;
   string d_key;
-private:
-  void getExpLen(uint16_t& startPos, uint16_t& expLen) const;
 };
 
 class DSRecordContent : public DNSRecordContent
@@ -252,6 +248,18 @@ public:
   uint8_t d_algorithm, d_digesttype;
   string d_digest;
 };
+
+class DLVRecordContent : public DNSRecordContent
+{
+public:
+  DLVRecordContent();
+  includeboilerplate(DLV)
+
+  uint16_t d_tag;
+  uint8_t d_algorithm, d_digesttype;
+  string d_digest;
+};
+
 
 class SSHFPRecordContent : public DNSRecordContent
 {
@@ -295,6 +303,17 @@ private:
   uint8_t d_algorithm;
   string d_certificate;
 };
+
+class TLSARecordContent : public DNSRecordContent
+{
+public:
+  includeboilerplate(TLSA)
+
+private:
+  uint8_t d_certusage, d_selector, d_matchtype;
+  string d_cert;
+};
+
 
 class RRSIGRecordContent : public DNSRecordContent
 {

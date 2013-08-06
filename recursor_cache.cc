@@ -8,7 +8,7 @@
 #include "recursor_cache.hh"
 #include "cachecleaner.hh"
 
-using namespace std;
+#include "namespaces.hh"
 #include "namespaces.hh"
 
 #include "config.h"
@@ -27,6 +27,7 @@ DNSResourceRecord String2DNSRR(const string& qname, const QType& qt, const strin
   }
   else if(rr.qtype.getCode()==QType::AAAA && serial.size()==16) {
     ComboAddress tmp;
+    memset(&tmp, 0, sizeof(tmp));
     tmp.sin4.sin_family=AF_INET6;
     memcpy(tmp.sin6.sin6_addr.s6_addr, serial.c_str(), 16);
     rr.content=tmp.toString();
@@ -95,6 +96,7 @@ unsigned int MemRecursorCache::bytes()
   unsigned int ret=0;
 
   for(cache_t::const_iterator i=d_cache.begin(); i!=d_cache.end(); ++i) {
+    ret+=sizeof(struct CacheEntry);
     ret+=(unsigned int)i->d_qname.length();
     for(vector<StoredRecord>::const_iterator j=i->d_records.begin(); j!= i->d_records.end(); ++j)
       ret+=j->size();
@@ -188,6 +190,7 @@ void MemRecursorCache::replace(time_t now, const string &qname, const QType& qt,
   d_cachecachevalid=false;
   tuple<string, uint16_t> key=make_tuple(qname, qt.getCode());
   cache_t::iterator stored=d_cache.find(key);
+  uint32_t maxTTD=UINT_MAX;
 
   bool isNew=false;
   if(stored == d_cache.end()) {
@@ -220,9 +223,18 @@ void MemRecursorCache::replace(time_t now, const string &qname, const QType& qt,
     }
   }
   
+  // limit TTL of auth->auth NSset update if needed, except for root
+  if(ce.d_auth && auth && qt.getCode()==QType::NS && !((qname.length()==1 && qname[0]=='.'))) {
+    // cerr<<"\tLimiting TTL of auth->auth NS set replace"<<endl;
+    vector<StoredRecord>::iterator j;
+    for(j = ce.d_records.begin() ; j != ce.d_records.end(); ++j) {
+      maxTTD=min(maxTTD, j->d_ttd);
+    }      
+  }
+
   // make sure that we CAN refresh the root
   if(auth && ((qname.length()==1 && qname[0]=='.') || !attemptToRefreshNSTTL(qt, content, ce) ) ) {
-    // cerr<<"\tGot auth data, and it was not refresh attempt of an NS record, nuking storage"<<endl;
+    // cerr<<"\tGot auth data, and it was not refresh attempt of an unchanged NS set, nuking storage"<<endl;
     ce.d_records.clear(); // clear non-auth data
     ce.d_auth = true;
     isNew=true;           // data should be sorted again
@@ -232,8 +244,8 @@ void MemRecursorCache::replace(time_t now, const string &qname, const QType& qt,
 
   // cerr<<"\tHave "<<content.size()<<" records to store\n";
   for(set<DNSResourceRecord>::const_iterator i=content.begin(); i != content.end(); ++i) {
-    // cerr<<"To store: "<<i->content<<endl;
-    dr.d_ttd=i->ttl;
+    // cerr<<"To store: "<<i->content<<" with ttl/ttd "<<i->ttl<<endl;
+    dr.d_ttd=min(maxTTD, i->ttl);
     dr.d_string=DNSRR2String(*i);
     
     if(isNew) 
@@ -249,7 +261,7 @@ void MemRecursorCache::replace(time_t now, const string &qname, const QType& qt,
             //~ cerr<<"\t\tNot doing so, trying to raise TTL NS\n";
             continue;
           }
-          if(i->ttl > j->d_ttd || (auth && d_followRFC2181) ) { // authoritative packets can override the TTL to be lower
+          if(i->ttl > j->d_ttd || (auth) ) { // authoritative packets can override the TTL to be lower
             //~ cerr<<"\t\tUpdating the ttl, diff="<<j->d_ttd - i->ttl<<endl;;
             j->d_ttd=i->ttl;
           }
@@ -297,22 +309,34 @@ int MemRecursorCache::doWipeCache(const string& name, uint16_t qtype)
 bool MemRecursorCache::doAgeCache(time_t now, const string& name, uint16_t qtype, int32_t newTTL)
 {
   cache_t::iterator iter = d_cache.find(tie(name, qtype));
-  if(iter == d_cache.end()) 
+  uint32_t maxTTD=std::numeric_limits<uint32_t>::min();
+  if(iter == d_cache.end()) {
     return false;
+  }
 
-  int32_t ttl = iter->getTTD() - now;
-  if(ttl < 0) 
+  CacheEntry ce = *iter;
+
+  if(ce.d_records.size()==1) {
+    maxTTD=ce.d_records.begin()->d_ttd;
+  }
+  else { // find the LATEST ttd
+    for(vector<StoredRecord>::const_iterator i=ce.d_records.begin(); i != ce.d_records.end(); ++i)
+      maxTTD=max(maxTTD, i->d_ttd);
+  }
+
+  int32_t maxTTL = maxTTD - now;
+
+  if(maxTTL < 0)
     return false;  // would be dead anyhow
 
-  if(ttl > newTTL) {
+  if(maxTTL > newTTL) {
     d_cachecachevalid=false;
 
-    ttl = newTTL;
-    uint32_t newTTD = now + ttl;
+    uint32_t newTTD = now + newTTL;
     
-    CacheEntry ce = *iter;
     for(vector<StoredRecord>::iterator j = ce.d_records.begin() ; j != ce.d_records.end(); ++j)  {
-      j->d_ttd = newTTD;
+      if(j->d_ttd>newTTD) // do never renew expired or older TTLs
+        j->d_ttd = newTTD;
     }
     
     d_cache.replace(iter, ce);
@@ -321,6 +345,28 @@ bool MemRecursorCache::doAgeCache(time_t now, const string& name, uint16_t qtype
   return false;
 }
 
+uint64_t MemRecursorCache::doDumpNSSpeeds(int fd)
+{
+  FILE* fp=fdopen(dup(fd), "w");
+  if(!fp)
+    return 0;
+  fprintf(fp, "; nsspeed dump from thread follows\n;\n");
+  uint64_t count=0;
+
+  for(SyncRes::nsspeeds_t::iterator i = t_sstorage->nsSpeeds.begin() ; i!= t_sstorage->nsSpeeds.end(); ++i)
+  {
+    count++;
+    fprintf(fp, "%s -> ", i->first.c_str());
+    for(SyncRes::DecayingEwmaCollection::collection_t::iterator j = i->second.d_collection.begin(); j!= i->second.d_collection.end(); ++j)
+    {
+      // typedef vector<pair<ComboAddress, DecayingEwma> > collection_t;
+      fprintf(fp, "%s/%f ", j->first.toString().c_str(), j->second.peek());
+    }
+    fprintf(fp, "\n");
+  }
+  fclose(fp);
+  return count;
+}
 
 uint64_t MemRecursorCache::doDump(int fd)
 {

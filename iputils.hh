@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2002 - 2008  PowerDNS.COM BV
+    Copyright (C) 2002 - 2011  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
@@ -32,11 +32,14 @@
 #include <functional>
 #include "ahuexception.hh"
 #include "misc.hh"
+#include <sys/socket.h>
+#include <netdb.h>
+
 #include <boost/tuple/tuple.hpp>
 #include <boost/tuple/tuple_comparison.hpp>
 #include <boost/lexical_cast.hpp>
 
-using namespace std;
+#include "namespaces.hh"
 
 union ComboAddress {
   struct sockaddr_in sin4;
@@ -78,7 +81,7 @@ union ComboAddress {
       return memcmp(&sin6.sin6_addr.s6_addr, &rhs.sin6.sin6_addr.s6_addr, 16) > 0;
   }
 
-  struct addressOnlyLessThan: public binary_function<string, string, bool>
+  struct addressOnlyLessThan: public std::binary_function<string, string, bool>
   {
     bool operator()(const ComboAddress& a, const ComboAddress& b) const
     {
@@ -108,18 +111,20 @@ union ComboAddress {
     sin4.sin_port=0;
   }
 
+  // 'port' sets a default value in case 'str' does not set a port
   explicit ComboAddress(const string& str, uint16_t port=0)
   {
     memset(&sin6, 0, sizeof(sin6));
     sin4.sin_family = AF_INET;
-    
-    if(!IpToU32(str, (uint32_t*)&sin4.sin_addr.s_addr)) {
+    sin4.sin_port = 0;
+    if(makeIPv4sockaddr(str, &sin4)) {
       sin6.sin6_family = AF_INET6;
       if(makeIPv6sockaddr(str, &sin6) < 0)
         throw AhuException("Unable to convert presentation address '"+ str +"'"); 
       
     }
-    sin4.sin_port=htons(port);
+    if(!sin4.sin_port) // 'str' overrides port!
+      sin4.sin_port=htons(port);
   }
 
   bool isMappedIPv4()  const
@@ -156,14 +161,10 @@ union ComboAddress {
 
   string toString() const
   {
-    char tmp[128];
-    if(sin4.sin_family==AF_INET && !Utility::inet_ntop(AF_INET, ( const char * ) &sin4.sin_addr, tmp, sizeof(tmp)))
-      return tmp;
-
-    if(sin4.sin_family==AF_INET6 && !Utility::inet_ntop(AF_INET6, ( const char * ) &sin6.sin6_addr, tmp, sizeof(tmp)))
-      return tmp;
+    char host[1024];
+    getnameinfo((struct sockaddr*) this, getSocklen(), host, sizeof(host),0, 0, NI_NUMERICHOST);
       
-    return tmp;
+    return host;
   }
 
   string toStringWithPort() const
@@ -199,6 +200,25 @@ inline ComboAddress makeComboAddress(const string& str)
 class Netmask
 {
 public:
+  Netmask()
+  {
+	d_network.sin4.sin_family=0; // disable this doing anything useful
+  }
+  
+  Netmask(const ComboAddress& network, uint8_t bits=0xff)
+  {
+    d_network = network;
+    
+    if(bits == 0xff)
+      bits = (network.sin4.sin_family == AF_INET) ? 32 : 128;
+    
+    d_bits = bits;
+    if(d_bits<32)
+      d_mask=~(0xFFFFFFFF>>d_bits);
+    else
+      d_mask=0xFFFFFFFF; // not actually used for IPv6
+  }
+  
   //! Constructor supplies the mask, which cannot be changed 
   Netmask(const string &mask) 
   {
@@ -206,7 +226,7 @@ public:
     d_network=makeComboAddress(split.first);
     
     if(!split.second.empty()) {
-      d_bits = (uint8_t) atoi(split.second.c_str());
+      d_bits = lexical_cast<unsigned int>(split.second);
       if(d_bits<32)
         d_mask=~(0xFFFFFFFF>>d_bits);
       else
@@ -270,9 +290,21 @@ public:
 
   string toString() const
   {
-    return d_network.toString()+"/"+boost::lexical_cast<string>(d_bits);
+    return d_network.toString()+"/"+boost::lexical_cast<string>((unsigned int)d_bits);
   }
 
+  string toStringNoMask() const
+  {
+    return d_network.toString();
+  }
+  const ComboAddress& getNetwork() const
+  {
+    return d_network;
+  }
+  int getBits() const
+  {
+    return d_bits;
+  }
 private:
   ComboAddress d_network;
   uint32_t d_mask;

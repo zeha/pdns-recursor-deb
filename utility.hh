@@ -71,7 +71,7 @@ typedef int socklen_t;
 #endif // WIN32
 #include <string>
 
-using namespace std;
+#include "namespaces.hh"
 
 //! A semaphore class.
 class Semaphore
@@ -195,6 +195,9 @@ public:
 
   //! Sets the socket into non-blocking mode.
   static bool setNonBlocking( Utility::sock_t socket );
+  
+  //! Marks the socket to be closed on exec().
+  static bool setCloseOnExec ( Utility::sock_t socket );
   
   //! Sleeps for a number of seconds.
   static unsigned int sleep( unsigned int seconds );

@@ -317,9 +317,43 @@ int waitForRWData(int fd, bool waitForRead, int seconds, int useconds)
 
   ret = poll(&pfd, 1, seconds * 1000 + useconds/1000);
   if ( ret == -1 )
-    errno = ETIMEDOUT;
+    errno = ETIMEDOUT; // ???
 
   return ret;
+}
+
+// returns -1 in case of error, 0 if no data is available, 1 if there is. In the first two cases, errno is set
+int waitFor2Data(int fd1, int fd2, int seconds, int useconds, int*fd)
+{
+  int ret;
+
+  struct pollfd pfds[2];
+  memset(&pfds[0], 0, 2*sizeof(struct pollfd));
+  pfds[0].fd = fd1;
+  pfds[1].fd = fd2;
+  
+  pfds[0].events= pfds[1].events = POLLIN;
+
+  int nsocks = 1 + (fd2 >= 0); // fd2 can optionally be -1
+
+  if(seconds >= 0)
+    ret = poll(pfds, nsocks, seconds * 1000 + useconds/1000);
+  else
+    ret = poll(pfds, nsocks, -1);
+  if(!ret || ret < 0)
+    return ret;
+    
+  if((pfds[0].revents & POLLIN) && !(pfds[1].revents & POLLIN))
+    *fd = pfds[0].fd;
+  else if((pfds[1].revents & POLLIN) && !(pfds[0].revents & POLLIN))
+    *fd = pfds[1].fd;
+  else if(ret == 2) {
+    *fd = pfds[random()%2].fd;
+  }
+  else
+    *fd = -1; // should never happen
+  
+  return 1;
 }
 
 
@@ -329,13 +363,13 @@ string humanDuration(time_t passed)
   if(passed<60)
     ret<<passed<<" seconds";
   else if(passed<3600)
-    ret<<setprecision(2)<<passed/60.0<<" minutes";
+    ret<<std::setprecision(2)<<passed/60.0<<" minutes";
   else if(passed<86400)
-    ret<<setprecision(3)<<passed/3600.0<<" hours";
+    ret<<std::setprecision(3)<<passed/3600.0<<" hours";
   else if(passed<(86400*30.41))
-    ret<<setprecision(3)<<passed/86400.0<<" days";
+    ret<<std::setprecision(3)<<passed/86400.0<<" days";
   else
-    ret<<setprecision(3)<<passed/(86400*30.41)<<" months";
+    ret<<std::setprecision(3)<<passed/(86400*30.41)<<" months";
 
   return ret.str();
 }
@@ -393,6 +427,9 @@ string getHostname()
 #ifdef WIN32
 # define MAXHOSTNAMELEN 1025
 #endif // WIN32
+#ifndef MAXHOSTNAMELEN
+# define MAXHOSTNAMELEN 255
+#endif
 
   char tmp[MAXHOSTNAMELEN];
   if(gethostname(tmp, MAXHOSTNAMELEN))
@@ -481,23 +518,6 @@ string U32ToIP(uint32_t val)
 }
 
 
-const string sockAddrToString(struct sockaddr_in *remote) 
-{    
-  if(remote->sin_family == AF_INET) {
-    struct sockaddr_in sip;
-    memcpy(&sip,(struct sockaddr_in*)remote,sizeof(sip));
-    return inet_ntoa(sip.sin_addr);
-  }
-  else {
-    char tmp[128];
-    
-    if(!Utility::inet_ntop(AF_INET6, ( const char * ) &((struct sockaddr_in6 *)remote)->sin6_addr, tmp, sizeof(tmp)))
-      return "IPv6 untranslateable";
-
-    return tmp;
-  }
-}
-
 string makeHexDump(const string& str)
 {
   char tmp[5];
@@ -510,8 +530,6 @@ string makeHexDump(const string& str)
   }
   return ret;
 }
-
-
 
 // shuffle, maintaining some semblance of order
 void shuffle(vector<DNSResourceRecord>& rrs)
@@ -541,6 +559,18 @@ void shuffle(vector<DNSResourceRecord>& rrs)
   // we don't shuffle the rest
 }
 
+static bool comparePlace(DNSResourceRecord a, DNSResourceRecord b)
+{
+  return (a.d_place < b.d_place);
+}
+
+// make sure rrs is sorted in d_place order to avoid surprises later
+// then shuffle the parts that desire shuffling
+void orderAndShuffle(vector<DNSResourceRecord>& rrs)
+{
+  std::stable_sort(rrs.begin(), rrs.end(), comparePlace);
+  shuffle(rrs);
+}
 
 void normalizeTV(struct timeval& tv)
 {
@@ -585,10 +615,8 @@ pair<string, string> splitField(const string& inp, char sepa)
   return ret;
 }
 
-boost::optional<int> logFacilityToLOG(unsigned int facility)
+int logFacilityToLOG(unsigned int facility)
 {
-  boost::optional<int> ret;
-
   switch(facility) {
   case 0:
     return LOG_LOCAL0;
@@ -607,7 +635,7 @@ boost::optional<int> logFacilityToLOG(unsigned int facility)
   case 7:
     return(LOG_LOCAL7);
   default:
-    return ret;
+    return -1;
   }
 }
 
@@ -665,6 +693,18 @@ string dotConcat(const std::string& a, const std::string &b)
 
 int makeIPv6sockaddr(const std::string& addr, struct sockaddr_in6* ret)
 {
+  if(addr.empty())
+    return -1;
+  string ourAddr(addr);
+  int port = -1;
+  if(addr[0]=='[') { // [::]:53 style address
+    string::size_type pos = addr.find(']');
+    if(pos == string::npos || pos + 2 > addr.size() || addr[pos+1]!=':')
+      return -1;
+    ourAddr.assign(addr.c_str() + 1, pos-1);
+    port = atoi(addr.c_str()+pos+2);  
+  }
+  
   struct addrinfo* res;
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
@@ -672,16 +712,56 @@ int makeIPv6sockaddr(const std::string& addr, struct sockaddr_in6* ret)
   hints.ai_family = AF_INET6;
   hints.ai_flags = AI_NUMERICHOST;
   
-  if(getaddrinfo(addr.c_str(), 0, &hints, &res) < 0) {
-    perror("getaddrinfo");
+  int error;
+  if((error=getaddrinfo(ourAddr.c_str(), 0, &hints, &res))) { // this is correct
+    /*
+    cerr<<"Error translating IPv6 address '"<<addr<<"': ";
+    if(error==EAI_SYSTEM)
+      cerr<<strerror(errno)<<endl;
+    else
+      cerr<<gai_strerror(error)<<endl;
+    */
     return -1;
   }
   
-  memcpy(ret, res->ai_addr, sizeof(*ret));
-  
+  memcpy(ret, res->ai_addr, res->ai_addrlen);
+  if(port >= 0)
+    ret->sin6_port = htons(port);
   freeaddrinfo(res);
   return 0;
 }
+
+int makeIPv4sockaddr(const string &str, struct sockaddr_in* ret)
+{
+  if(str.empty()) {
+    return -1;
+  }
+  struct in_addr inp;
+  
+  string::size_type pos = str.find(':');
+  if(pos == string::npos) { // no port specified, not touching the port
+    if(Utility::inet_aton(str.c_str(), &inp)) {
+      ret->sin_addr.s_addr=inp.s_addr;
+      return 0;
+    }
+    return -1;
+  }
+  if(!*(str.c_str() + pos + 1)) // trailing :
+    return -1; 
+    
+  char *eptr = (char*)str.c_str() + str.size();
+  int port = strtol(str.c_str() + pos + 1, &eptr, 10);
+  if(*eptr)
+    return -1;
+  
+  ret->sin_port = htons(port);
+  if(Utility::inet_aton(str.substr(0, pos).c_str(), &inp)) {
+    ret->sin_addr.s_addr=inp.s_addr;
+    return 0;
+  }
+  return -1;
+}
+
 
 //! read a line of text from a FILE* to a std::string, returns false on 'no data'
 bool stringfgets(FILE* fp, std::string& line)
@@ -696,4 +776,10 @@ bool stringfgets(FILE* fp, std::string& line)
     line.append(buffer); 
   } while(!strchr(buffer, '\n'));
   return true;
+}
+
+Regex::Regex(const string &expr)
+{
+  if(regcomp(&d_preg, expr.c_str(), REG_ICASE|REG_NOSUB|REG_EXTENDED))
+    throw AhuException("Regular expression did not compile");
 }

@@ -18,6 +18,7 @@
 
 #include "utility.hh"
 #include "dnsrecords.hh"
+#include <boost/foreach.hpp>
 
 boilerplate_conv(A, ns_t_a, conv.xfrIP(d_ip));
 
@@ -61,7 +62,7 @@ public:
   static DNSRecordContent* make(const string& zone) 
   {
     AAAARecordContent *ar=new AAAARecordContent();
-    if(Utility::inet_pton( AF_INET6, zone.c_str(), static_cast< void * >( ar->d_ip6 )) < 0)
+    if(Utility::inet_pton( AF_INET6, zone.c_str(), static_cast< void * >( ar->d_ip6 )) <= 0)
       throw MOADNSException("Asked to encode '"+zone+"' as an IPv6 address, but does not parse");
     return ar;
   }
@@ -114,8 +115,8 @@ void OPTRecordContent::getData(vector<pair<uint16_t, string> >& options)
   string::size_type pos=0;
   uint16_t code, len;
   while(d_data.size() >= 4 + pos) {
-    code = 0xff * d_data[pos] + d_data[pos+1];
-    len = 0xff * d_data[pos+2] + d_data[pos+3];
+    code = 256 * (unsigned char)d_data[pos] + (unsigned char)d_data[pos+1];
+    len = 256 * (unsigned char)d_data[pos+2] + (unsigned char)d_data[pos+3];
     pos+=4;
 
     if(pos + len > d_data.size())
@@ -221,14 +222,31 @@ boilerplate_conv(CERT, 37,
         	 conv.xfr8BitInt(d_algorithm); 
         	 conv.xfrBlob(d_certificate);
         	 )
+		 
+boilerplate_conv(TLSA, 52, 
+        	 conv.xfr8BitInt(d_certusage); 
+        	 conv.xfr8BitInt(d_selector); 
+        	 conv.xfr8BitInt(d_matchtype); 
+        	 conv.xfrHexBlob(d_cert, true);
+        	 )		 
+		 
 #undef DS
 DSRecordContent::DSRecordContent() : DNSRecordContent(43) {}
 boilerplate_conv(DS, 43, 
         	 conv.xfr16BitInt(d_tag); 
         	 conv.xfr8BitInt(d_algorithm); 
         	 conv.xfr8BitInt(d_digesttype); 
-        	 conv.xfrHexBlob(d_digest);
+        	 conv.xfrHexBlob(d_digest, true); // keep reading across spaces
         	 )
+
+DLVRecordContent::DLVRecordContent() : DNSRecordContent(32769) {}
+boilerplate_conv(DLV,32769 , 
+        	 conv.xfr16BitInt(d_tag); 
+        	 conv.xfr8BitInt(d_algorithm); 
+        	 conv.xfr8BitInt(d_digesttype); 
+        	 conv.xfrHexBlob(d_digest, true); // keep reading across spaces
+        	 )
+
 
 boilerplate_conv(SSHFP, 44, 
         	 conv.xfr8BitInt(d_algorithm); 
@@ -240,7 +258,6 @@ boilerplate_conv(RRSIG, 46,
         	 conv.xfrType(d_type); 
           	 conv.xfr8BitInt(d_algorithm); 
           	 conv.xfr8BitInt(d_labels); 
-
           	 conv.xfr32BitInt(d_originalttl); 
           	 conv.xfrTime(d_sigexpire); 
           	 conv.xfrTime(d_siginception); 
@@ -274,35 +291,6 @@ uint16_t DNSKEYRecordContent::getTag()
   return ac & 0xFFFF;
 }
 
-void DNSKEYRecordContent::getExpLen(uint16_t& startPos, uint16_t& expLen) const
-{
-  unsigned char* decoded=(unsigned char*) d_key.c_str();
-  if(decoded[0] != 0) {
-    startPos=1;
-    expLen=decoded[0];
-  }
-  else {
-    startPos=3;
-    expLen=decoded[1]*0xff + decoded[2]; // XXX FIXME
-  }
-}
-
-string DNSKEYRecordContent::getExponent() const
-{
-  uint16_t startPos, expLen;
-  getExpLen(startPos, expLen);
-  return d_key.substr(startPos, expLen);
-}
-
-string DNSKEYRecordContent::getModulus() const
-{
-  uint16_t startPos, expLen;
-  getExpLen(startPos, expLen);
-
-  return d_key.substr(startPos+expLen);
-}
-
-
 // "fancy records" 
 boilerplate_conv(URL, QType::URL, 
         	 conv.xfrLabel(d_url);
@@ -312,29 +300,32 @@ boilerplate_conv(MBOXFW, QType::MBOXFW,
         	 conv.xfrLabel(d_mboxfw);
         	 )
 
+
+
 bool getEDNSOpts(const MOADNSParser& mdp, EDNSOpts* eo)
 {
-  if(mdp.d_header.arcount && !mdp.d_answers.empty() && 
-     mdp.d_answers.back().first.d_type == QType::OPT) {
-    eo->d_packetsize=mdp.d_answers.back().first.d_class;
-    
-    EDNS0Record stuff;
-    uint32_t ttl=ntohl(mdp.d_answers.back().first.d_ttl);
-    memcpy(&stuff, &ttl, sizeof(stuff));
-
-    eo->d_extRCode=stuff.extRCode;
-    eo->d_version=stuff.version;
-    eo->d_Z = ntohs(stuff.Z);
-    OPTRecordContent* orc = 
-      dynamic_cast<OPTRecordContent*>(mdp.d_answers.back().first.d_content.get());
-    if(!orc)
-      return false;
-    orc->getData(eo->d_options);
-
-    return true;
+  if(mdp.d_header.arcount && !mdp.d_answers.empty()) {
+    BOOST_FOREACH(const MOADNSParser::answers_t::value_type& val, mdp.d_answers) {
+      if(val.first.d_place == DNSRecord::Additional && val.first.d_type == QType::OPT) {
+	eo->d_packetsize=val.first.d_class;
+       
+	EDNS0Record stuff;
+	uint32_t ttl=ntohl(val.first.d_ttl);
+	memcpy(&stuff, &ttl, sizeof(stuff));
+	
+	eo->d_extRCode=stuff.extRCode;
+	eo->d_version=stuff.version;
+	eo->d_Z = ntohs(stuff.Z);
+	OPTRecordContent* orc = 
+	  dynamic_cast<OPTRecordContent*>(val.first.d_content.get());
+	if(!orc)
+	  return false;
+	orc->getData(eo->d_options);
+	return true;
+      }
+    }
   }
-  else
-    return false;
+  return false;
 }
 
 
@@ -370,6 +361,8 @@ void reportOtherTypes()
    NSECRecordContent::report();
    NSEC3RecordContent::report();
    NSEC3PARAMRecordContent::report();
+   TLSARecordContent::report();
+   DLVRecordContent::report();
    DNSRecordContent::regist(0xff, QType::TSIG, &TSIGRecordContent::make, &TSIGRecordContent::make, "TSIG");
    OPTRecordContent::report();
 }

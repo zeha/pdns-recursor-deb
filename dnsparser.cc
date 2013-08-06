@@ -1,6 +1,6 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2005 - 2010  PowerDNS.COM BV
+    Copyright (C) 2005 - 2011  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 as 
@@ -20,6 +20,7 @@
 #include "dnswriter.hh"
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/format.hpp>
 
 #include "namespaces.hh"
 
@@ -100,8 +101,6 @@ static const string EncodeDNSLabel(const string& input)
     }  
   }    
   ret.append(1, 0);
-//  cerr<<"Asked to encode '"<<input<<"', returning: '"<<makeHexDump(ret)<<endl;
-//  cerr<<"parts length: "<<parts.size()<<endl;
   return ret;
 }
 
@@ -171,26 +170,30 @@ DNSRecordContent* DNSRecordContent::mastermake(uint16_t qtype, uint16_t qclass,
   return i->second(content);
 }
 
-
 DNSRecordContent::typemap_t& DNSRecordContent::getTypemap()
 {
   static DNSRecordContent::typemap_t typemap;
   return typemap;
 }
 
-DNSRecordContent::namemap_t& DNSRecordContent::getNamemap()
+DNSRecordContent::n2typemap_t& DNSRecordContent::getN2Typemap()
 {
-  static DNSRecordContent::namemap_t namemap;
-  return namemap;
+  static DNSRecordContent::n2typemap_t n2typemap;
+  return n2typemap;
 }
+
+DNSRecordContent::t2namemap_t& DNSRecordContent::getT2Namemap()
+{
+  static DNSRecordContent::t2namemap_t t2namemap;
+  return t2namemap;
+}
+
 
 DNSRecordContent::zmakermap_t& DNSRecordContent::getZmakermap()
 {
   static DNSRecordContent::zmakermap_t zmakermap;
   return zmakermap;
 }
-
-
 
 void MOADNSParser::init(const char *packet, unsigned int len)
 {
@@ -264,7 +267,7 @@ void MOADNSParser::init(const char *packet, unsigned int len)
     }
 #endif 
   }
-  catch(out_of_range &re) {
+  catch(std::out_of_range &re) {
     if(validPacket && d_header.tc) { // don't sweat it over truncated packets, but do adjust an, ns and arcount
       if(n < d_header.ancount) {
         d_header.ancount=n; d_header.nscount = d_header.arcount = 0;
@@ -317,7 +320,7 @@ void PacketReader::copyRecord(vector<unsigned char>& dest, uint16_t len)
 void PacketReader::copyRecord(unsigned char* dest, uint16_t len)
 {
   if(d_pos + len > d_content.size())
-    throw MOADNSException("Attempt to copy outside of packet");
+    throw std::out_of_range("Attempt to copy outside of packet");
 
   memcpy(dest, &d_content.at(d_pos), len);
   d_pos+=len;
@@ -386,14 +389,23 @@ string PacketReader::getLabel(unsigned int recurs)
 static string txtEscape(const string &name)
 {
   string ret;
+  char ebuf[5];
 
-  for(string::const_iterator i=name.begin();i!=name.end();++i)
-    if(*i=='"' || *i=='\\'){
+  for(string::const_iterator i=name.begin();i!=name.end();++i) {
+    if(*i=='\n') {  // XXX FIXME this should do a way better job!
+      ret += "\\010";
+    }
+    else if((unsigned char) *i > 127) {
+      snprintf(ebuf, sizeof(ebuf), "\\%03u", (unsigned char)*i);
+      ret += ebuf;
+    }
+    else if(*i=='"' || *i=='\\'){
       ret += '\\';
       ret += *i;
     }
     else
       ret += *i;
+  }
   return ret;
 }
 
@@ -425,7 +437,7 @@ string PacketReader::getText(bool multi)
 
 void PacketReader::getLabelFromContent(const vector<uint8_t>& content, uint16_t& frompos, string& ret, int recurs) 
 {
-  if(recurs > 10)
+  if(recurs > 1000) // the forward reference-check below should make this test 100% obsolete
     throw MOADNSException("Loop");
 
   for(;;) {
@@ -439,15 +451,24 @@ void PacketReader::getLabelFromContent(const vector<uint8_t>& content, uint16_t&
     if((labellen & 0xc0) == 0xc0) {
       uint16_t offset=256*(labellen & ~0xc0) + (unsigned int)content.at(frompos++) - sizeof(dnsheader);
       //        cout<<"This is an offset, need to go to: "<<offset<<endl;
+
+      if(offset >= frompos-2)
+        throw MOADNSException("forward reference during label decompression");
       return getLabelFromContent(content, offset, ret, ++recurs);
     }
     else {
       // XXX FIXME THIS MIGHT BE VERY SLOW!
       ret.reserve(ret.size() + labellen + 2);
       for(string::size_type n = 0 ; n < labellen; ++n, frompos++) {
-        if(content.at(frompos)=='.' || content.at(frompos)=='\\')
+        if(content.at(frompos)=='.' || content.at(frompos)=='\\') {
           ret.append(1, '\\');
-        ret.append(1, content[frompos]);
+          ret.append(1, content[frompos]);
+        }
+        else if(content.at(frompos)==' ') {
+          ret+="\\032";
+        }
+        else 
+          ret.append(1, content[frompos]);
       }
       ret.append(1,'.');
     }
@@ -456,7 +477,7 @@ void PacketReader::getLabelFromContent(const vector<uint8_t>& content, uint16_t&
 
 void PacketReader::xfrBlob(string& blob)
 {
-  if(d_recordlen)
+  if(d_recordlen && !(d_pos == (d_startrecordpos + d_recordlen)))
     blob.assign(&d_content.at(d_pos), &d_content.at(d_startrecordpos + d_recordlen - 1 ) + 1);
   else
     blob.clear();
@@ -476,7 +497,7 @@ void PacketReader::xfrBlob(string& blob, int length)
 }
 
 
-void PacketReader::xfrHexBlob(string& blob)
+void PacketReader::xfrHexBlob(string& blob, bool keepReading)
 {
   xfrBlob(blob);
 }
@@ -574,7 +595,7 @@ private:
   {
     d_notyouroffset += by;
     if(d_notyouroffset > d_packet.length())
-      throw range_error("dns packet out of range: "+lexical_cast<string>(d_notyouroffset) +" > " 
+      throw std::out_of_range("dns packet out of range: "+lexical_cast<string>(d_notyouroffset) +" > " 
       + lexical_cast<string>(d_packet.length()) );
   }
   std::string& d_packet;
@@ -587,16 +608,17 @@ private:
 // method of operation: silently fail if it doesn't work - we're only trying to be nice, don't fall over on it
 void ageDNSPacket(std::string& packet, uint32_t seconds)
 {
-  if(packet.length() < 12)
+  if(packet.length() < sizeof(dnsheader))
     return;
   try 
   {
-    const dnsheader* dh = (const dnsheader*)packet.c_str();
-    int numrecords = ntohs(dh->ancount) + ntohs(dh->nscount) + ntohs(dh->arcount);
+    dnsheader dh;
+    memcpy((void*)&dh, (const dnsheader*)packet.c_str(), sizeof(dh));
+    int numrecords = ntohs(dh.ancount) + ntohs(dh.nscount) + ntohs(dh.arcount);
     DNSPacketMangler dpm(packet);
     
     int n;
-    for(n=0; n < ntohs(dh->qdcount) ; ++n) {
+    for(n=0; n < ntohs(dh.qdcount) ; ++n) {
       dpm.skipLabel();
       dpm.skipBytes(4); // qtype, qclass
     }

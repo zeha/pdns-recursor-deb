@@ -19,7 +19,7 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/utility.hpp>
 #include <csignal>
-using namespace std;
+#include "namespaces.hh"
 #include "namespaces.hh"
 
 
@@ -54,6 +54,8 @@ public:
     d_family=af;
     if((d_socket=(int)socket(af,st, pt))<0)
       throw NetworkError(strerror(errno));
+    Utility::setCloseOnExec(d_socket);
+
     d_buflen=4096;
     d_buffer=new char[d_buflen];
   }

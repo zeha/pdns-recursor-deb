@@ -3,7 +3,7 @@ SBINDIR=/usr/sbin/
 BINDIR=/usr/bin/
 CONFIGDIR="/etc/powerdns/"
 OPTFLAGS?=-O3
-CXXFLAGS:= $(CXXFLAGS) -Wall $(OPTFLAGS) $(PROFILEFLAGS) $(ARCHFLAGS) -pthread
+CXXFLAGS:= $(CXXFLAGS) -Iext/rapidjson/include -Wall $(OPTFLAGS) $(PROFILEFLAGS) $(ARCHFLAGS) -pthread
 CFLAGS:=$(CFLAGS) -Wall $(OPTFLAGS) $(PROFILEFLAGS) $(ARCHFLAGS) -pthread
 LDFLAGS:=$(LDFLAGS) $(ARCHFLAGS) -pthread
 
@@ -18,8 +18,9 @@ PDNS_RECURSOR_OBJECTS=syncres.o  misc.o unix_utility.o qtype.o logger.o  \
 arguments.o lwres.o pdns_recursor.o recursor_cache.o dnsparser.o \
 dnswriter.o dnsrecords.o rcpgenerator.o base64.o zoneparser-tng.o \
 rec_channel.o rec_channel_rec.o selectmplexer.o sillyrecords.o \
-dns_random.o aescrypt.o aeskey.o aes_modes.o aestab.o lua-pdns-recursor.o \
-randomhelper.o recpacketcache.o dns.o reczones.o base32.o nsecrecords.o
+dns_random.o aescrypt.o aeskey.o aes_modes.o aestab.o dnslabeltext.o \
+lua-pdns.o lua-recursor.o randomhelper.o recpacketcache.o dns.o \
+reczones.o base32.o nsecrecords.o json.o json_ws.o
 
 REC_CONTROL_OBJECTS=rec_channel.o rec_control.o arguments.o misc.o \
 	unix_utility.o logger.o qtype.o
@@ -32,7 +33,7 @@ all: message pdns_recursor rec_control
 
 ifeq ($(LUA), 1)
 	LUALIBS=$(LUA_LIBS_CONFIG)
-	CXXFLAGS+=$(LUA_CPPFLAGS_CONFIG) -DPDNS_ENABLE_LUA
+	CXXFLAGS+=$(LUA_CPPFLAGS_CONFIG) -DPDNS_ENABLE_LUA -DHAVE_LUA
 endif
 
 

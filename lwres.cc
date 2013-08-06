@@ -164,6 +164,7 @@ int asyncresolve(const ComboAddress& ip, const string& domain, int type, bool do
 
   lwr->d_result.clear();
   try {
+    lwr->d_tcbit=0;
     MOADNSParser mdp((const char*)buf.get(), len);
     lwr->d_aabit=mdp.d_header.aa;
     lwr->d_tcbit=mdp.d_header.tc;
@@ -186,7 +187,6 @@ int asyncresolve(const ComboAddress& ip, const string& domain, int type, bool do
       rr.priority = 0;
       rr.qtype=i->first.d_type;
       rr.qname=i->first.d_label;
-    
       rr.ttl=i->first.d_ttl;
       rr.content=i->first.d_content->getZoneRepresentation();  // this should be the serialised form
       rr.d_place=(DNSResourceRecord::Place) i->first.d_place;

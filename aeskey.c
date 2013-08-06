@@ -406,8 +406,10 @@ AES_RETURN aes_decrypt_key192(const unsigned char *key, aes_decrypt_ctx cx[1])
     cx->ks[v(48,(3))] = ss[3] = word_in(key, 3);
 
 #ifdef DEC_KS_UNROLL
-    cx->ks[v(48,(4))] = ff(ss[4] = word_in(key, 4));
-    cx->ks[v(48,(5))] = ff(ss[5] = word_in(key, 5));
+    ss[4] = word_in(key, 4);
+    cx->ks[v(48,(4))] = ff(ss[4]);
+    ss[5] = word_in(key, 5);
+    cx->ks[v(48,(5))] = ff(ss[5]);
     kdf6(cx->ks, 0); kd6(cx->ks, 1);
     kd6(cx->ks, 2);  kd6(cx->ks, 3);
     kd6(cx->ks, 4);  kd6(cx->ks, 5);
@@ -486,6 +488,7 @@ AES_RETURN aes_decrypt_key192(const unsigned char *key, aes_decrypt_ctx cx[1])
     ss[3] ^= ss[2]; k[v(56,(8*(i))+11)] = ss[3]; \
 }
 
+#if 0
 AES_RETURN aes_decrypt_key256(const unsigned char *key, aes_decrypt_ctx cx[1])
 {   uint_32t    ss[9];
 #if defined( d_vars )
@@ -497,10 +500,14 @@ AES_RETURN aes_decrypt_key256(const unsigned char *key, aes_decrypt_ctx cx[1])
     cx->ks[v(56,(3))] = ss[3] = word_in(key, 3);
 
 #ifdef DEC_KS_UNROLL
-    cx->ks[v(56,(4))] = ff(ss[4] = word_in(key, 4));
-    cx->ks[v(56,(5))] = ff(ss[5] = word_in(key, 5));
-    cx->ks[v(56,(6))] = ff(ss[6] = word_in(key, 6));
-    cx->ks[v(56,(7))] = ff(ss[7] = word_in(key, 7));
+    ss[4] = word_in(key, 4);
+    cx->ks[v(56,(4))] = ff(ss[4]);
+    ss[4] = word_in(key, 5);
+    cx->ks[v(56,(5))] = ff(ss[5]);
+    ss[4] = word_in(key, 6);
+    cx->ks[v(56,(6))] = ff(ss[6]);
+    ss[4] = word_in(key, 7);
+    cx->ks[v(56,(7))] = ff(ss[7]);
     kdf8(cx->ks, 0); kd8(cx->ks, 1);
     kd8(cx->ks, 2);  kd8(cx->ks, 3);
     kd8(cx->ks, 4);  kd8(cx->ks, 5);
@@ -530,11 +537,13 @@ AES_RETURN aes_decrypt_key256(const unsigned char *key, aes_decrypt_ctx cx[1])
 #endif
     return EXIT_SUCCESS;
 }
+#endif
 
 #endif
 
 #if defined( AES_VAR )
 
+#if 0
 AES_RETURN aes_decrypt_key(const unsigned char *key, int key_len, aes_decrypt_ctx cx[1])
 {
     switch(key_len)
@@ -545,6 +554,7 @@ AES_RETURN aes_decrypt_key(const unsigned char *key, int key_len, aes_decrypt_ct
     default: return EXIT_FAILURE;
     }
 }
+#endif
 
 #endif
 

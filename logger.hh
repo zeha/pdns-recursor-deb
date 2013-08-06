@@ -36,7 +36,7 @@ typedef int pthread_mutex_t;
 typedef int pthread_t;
 #endif // WIN32
 
-using namespace std;
+#include "namespaces.hh"
 
 //! The Logger class can be used to log messages in various ways.
 class Logger
@@ -110,6 +110,7 @@ public:
   */
   Logger& operator<<(const string &s);   //!< log a string
   Logger& operator<<(int);   //!< log an int
+  Logger& operator<<(double);   //!< log a double
   Logger& operator<<(unsigned int);   //!< log an unsigned int
   Logger& operator<<(long);   //!< log an unsigned int
   Logger& operator<<(unsigned long);   //!< log an unsigned int
@@ -117,7 +118,7 @@ public:
   Logger& operator<<(Urgency);    //!< set the urgency, << style
 
 #ifndef WIN32
-  Logger& operator<<(ostream & (&)(ostream &)); //!< this is to recognise the endl, and to commit the log
+  Logger& operator<<(std::ostream & (&)(std::ostream &)); //!< this is to recognise the endl, and to commit the log
 #else
   // This is a hack to keep MSVC from generating a internal compiler error.
   Logger& operator<<(ostream & (hack)(ostream &)); //!< this is to recognise the endl, and to commit the log

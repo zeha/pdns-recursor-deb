@@ -1,5 +1,6 @@
 #include "dns.hh"
 #include "misc.hh"
+#include "arguments.hh"
 #include <stdexcept>
 #include <iostream>
 #include <boost/algorithm/string.hpp>
@@ -9,7 +10,7 @@ static void appendEscapedLabel(string& ret, const char* begin, unsigned char lab
 {
   unsigned char n = 0;
   for(n = 0 ; n < labellen; ++n)
-    if(begin[n] == '.' || begin[n] == '\\')
+    if(begin[n] == '.' || begin[n] == '\\' || begin[n] == ' ')
       break;
   
   if( n == labellen) {
@@ -19,6 +20,7 @@ static void appendEscapedLabel(string& ret, const char* begin, unsigned char lab
   string label(begin, labellen);
   boost::replace_all(label, "\\",  "\\\\");
   boost::replace_all(label, ".",  "\\.");
+  boost::replace_all(label, " ",  "\\032");
   ret.append(label);
 }
 
@@ -48,7 +50,7 @@ private:
 //! compares two dns packets, skipping the header, but including the question and the qtype
 bool dnspacketLessThan(const std::string& a, const std::string& b)
 {
-  if(a.length() < 12 || b.length() < 12) 
+  if(a.length() <= 12 || b.length() <= 12) 
     return a.length() < b.length();
 //    throw runtime_error("Error parsing question in dnspacket comparison: packet too short");
     
@@ -122,4 +124,73 @@ string questionExpand(const char* packet, uint16_t len, uint16_t& type)
     type=(*pos)*256 + *(pos+1);
   // cerr << "returning: '"<<ret<<"'"<<endl;
   return ret;
+}
+
+void fillSOAData(const string &content, SOAData &data)
+{
+  // content consists of fields separated by spaces:
+  //  nameservername hostmaster serial-number [refresh [retry [expire [ minimum] ] ] ]
+
+  // fill out data with some plausible defaults:
+  // 10800 3600 604800 3600
+  vector<string>parts;
+  stringtok(parts,content);
+  int pleft=parts.size();
+
+  //  cout<<"'"<<content<<"'"<<endl;
+
+  if(pleft)
+    data.nameserver=parts[0];
+
+  if(pleft>1) 
+    data.hostmaster=attodot(parts[1]); // ahu@ds9a.nl -> ahu.ds9a.nl, piet.puk@ds9a.nl -> piet\.puk.ds9a.nl
+
+  data.serial = pleft > 2 ? strtoul(parts[2].c_str(), NULL, 10) : 0;
+
+  data.refresh = pleft > 3 ? atoi(parts[3].c_str())
+        : ::arg().asNum("soa-refresh-default");
+
+  data.retry = pleft > 4 ? atoi(parts[4].c_str())
+        : ::arg().asNum("soa-retry-default");
+
+  data.expire = pleft > 5 ? atoi(parts[5].c_str())
+        : ::arg().asNum("soa-expire-default");
+
+  data.default_ttl = pleft > 6 ?atoi(parts[6].c_str())
+        : ::arg().asNum("soa-minimum-ttl");
+}
+
+string serializeSOAData(const SOAData &d)
+{
+  ostringstream o;
+  //  nameservername hostmaster serial-number [refresh [retry [expire [ minimum] ] ] ]
+  o<<d.nameserver<<" "<< d.hostmaster <<" "<< d.serial <<" "<< d.refresh << " "<< d.retry << " "<< d.expire << " "<< d.default_ttl;
+
+  return o.str();
+}
+// the functions below update the 'arcount' and 'ancount', plus they serialize themselves to the stringbuffer
+
+string& attodot(string &str)
+{
+   if(str.find_first_of("@")==string::npos)
+      return str;
+
+   for (unsigned int i = 0; i < str.length(); i++)
+   {
+      if (str[i] == '@') {
+         str[i] = '.';
+         break;
+      } else if (str[i] == '.') {
+         str.insert(i++, "\\");
+      }
+   }
+   return str;
+}
+
+string strrcode(unsigned char rcode)
+{
+  static const char* rcodes[]={"No Error", "FormErr", "SERVFAIL", "NXDOMAIN", "NotImp", "Refused", "", "", "", "Not Auth"};
+  if((rcode < sizeof(rcodes) / sizeof(*rcodes)) && *rcodes[rcode])
+    return rcodes[rcode];
+  return "Err#"+lexical_cast<string>((int)rcode);
 }
