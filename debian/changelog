@@ -1,7 +1,8 @@
-pdns-recursor (3.5.2-1) UNRELEASED; urgency=low
+pdns-recursor (3.5.2-1) unstable; urgency=low
 
   * New upstream version (Closes: #710048, #682851, #671592, #697355, #649724)
     - Refresh patches
+  * Improve the patch to make pdns-recursor less chatty
   * Standards-Version: 3.9.4 (no changes necessary)
   * Remove pdns_hw on cleanup (Closes: #652833)
 
