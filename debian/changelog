@@ -1,3 +1,9 @@
+pdns-recursor (3.5.3-1) unstable; urgency=low
+
+  * New upstream version
+
+ -- Matthijs Möhlmann <matthijs@cacholong.nl>  Sun, 22 Sep 2013 14:45:58 +0200
+
 pdns-recursor (3.5.2-2) unstable; urgency=low
 
   * Enable on all architectures (Closes: #579194)
