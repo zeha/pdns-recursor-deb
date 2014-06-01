@@ -6,6 +6,10 @@
     it under the terms of the GNU General Public License version 2 as 
     published by the Free Software Foundation
 
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -60,7 +64,7 @@ public:
     const string& relevant=(parts.size() > 2) ? parts[2] : "";
     unsigned int total=atoi(parts[1].c_str());
     if(relevant.size()!=2*total)
-      throw runtime_error("invalid unknown record");
+      throw MOADNSException((boost::format("invalid unknown record length for label %s: size not equal to length field (%d != %d)") % d_dr.d_label.c_str() % relevant.size() % (2*total)).str());
     string out;
     out.reserve(total+1);
     for(unsigned int n=0; n < total; ++n) {
@@ -147,7 +151,7 @@ shared_ptr<DNSRecordContent> DNSRecordContent::unserialize(const string& qname, 
 }
 
 DNSRecordContent* DNSRecordContent::mastermake(const DNSRecord &dr, 
-        				       PacketReader& pr)
+                                               PacketReader& pr)
 {
   uint16_t searchclass = (dr.d_type == QType::OPT) ? 1 : dr.d_class; // class is invalid for OPT
 
@@ -160,7 +164,7 @@ DNSRecordContent* DNSRecordContent::mastermake(const DNSRecord &dr,
 }
 
 DNSRecordContent* DNSRecordContent::mastermake(uint16_t qtype, uint16_t qclass,
-        				       const string& content)
+                                               const string& content)
 {
   zmakermap_t::const_iterator i=getZmakermap().find(make_pair(qclass, qtype));
   if(i==getZmakermap().end()) {
@@ -169,6 +173,24 @@ DNSRecordContent* DNSRecordContent::mastermake(uint16_t qtype, uint16_t qclass,
 
   return i->second(content);
 }
+
+DNSRecordContent* DNSRecordContent::mastermake(const DNSRecord &dr, PacketReader& pr, uint16_t oc) {
+  // For opcode UPDATE and where the DNSRecord is an answer record, we don't care about content, because this is
+  // not used within the prerequisite section of RFC2136, so - we can simply use unknownrecordcontent.
+  // For section 3.2.3, we do need content so we need to get it properly. But only for the correct Qclasses.
+  if (oc == Opcode::Update && dr.d_place == DNSRecord::Answer && dr.d_class != 1)
+    return new UnknownRecordContent(dr, pr);
+
+  uint16_t searchclass = (dr.d_type == QType::OPT) ? 1 : dr.d_class; // class is invalid for OPT
+
+  typemap_t::const_iterator i=getTypemap().find(make_pair(searchclass, dr.d_type));
+  if(i==getTypemap().end() || !i->second) {
+    return new UnknownRecordContent(dr, pr);
+  }
+
+  return i->second(dr, pr);
+}
+
 
 DNSRecordContent::typemap_t& DNSRecordContent::getTypemap()
 {
@@ -202,7 +224,7 @@ void MOADNSParser::init(const char *packet, unsigned int len)
   
   memcpy(&d_header, packet, sizeof(dnsheader));
 
-  if(d_header.opcode!=0 && d_header.opcode != 4) // notification
+  if(d_header.opcode != Opcode::Query && d_header.opcode != Opcode::Notify && d_header.opcode != Opcode::Update)
     throw MOADNSException("Can't parse non-query packet with opcode="+ lexical_cast<string>(d_header.opcode));
 
   d_header.qdcount=ntohs(d_header.qdcount);
@@ -253,7 +275,7 @@ void MOADNSParser::init(const char *packet, unsigned int len)
       dr.d_label=label;
       dr.d_clen=ah.d_clen;
 
-      dr.d_content=boost::shared_ptr<DNSRecordContent>(DNSRecordContent::mastermake(dr, pr));
+      dr.d_content=boost::shared_ptr<DNSRecordContent>(DNSRecordContent::mastermake(dr, pr, d_header.opcode));
       d_answers.push_back(make_pair(dr, pr.d_pos));
 
       if(dr.d_type == QType::TSIG && dr.d_class == 0xff) 
@@ -263,7 +285,7 @@ void MOADNSParser::init(const char *packet, unsigned int len)
 #if 0    
     if(pr.d_pos!=contentlen) {
       throw MOADNSException("Packet ("+d_qname+"|#"+lexical_cast<string>(d_qtype)+") has trailing garbage ("+ lexical_cast<string>(pr.d_pos) + " < " + 
-        		    lexical_cast<string>(contentlen) + ")");
+                            lexical_cast<string>(contentlen) + ")");
     }
 #endif 
   }
@@ -281,8 +303,8 @@ void MOADNSParser::init(const char *packet, unsigned int len)
     }
     else {
       throw MOADNSException("Error parsing packet of "+lexical_cast<string>(len)+" bytes (rd="+
-        		    lexical_cast<string>(d_header.rd)+
-        		    "), out of bounds: "+string(re.what()));
+                            lexical_cast<string>(d_header.rd)+
+                            "), out of bounds: "+string(re.what()));
     }
   }
 }
@@ -376,7 +398,6 @@ uint8_t PacketReader::get8BitInt()
 {
   return d_content.at(d_pos++);
 }
-
 
 string PacketReader::getLabel(unsigned int recurs)
 {
@@ -473,6 +494,7 @@ void PacketReader::getLabelFromContent(const vector<uint8_t>& content, uint16_t&
 }
 
 void PacketReader::xfrBlob(string& blob)
+try
 {
   if(d_recordlen && !(d_pos == (d_startrecordpos + d_recordlen)))
     blob.assign(&d_content.at(d_pos), &d_content.at(d_startrecordpos + d_recordlen - 1 ) + 1);
@@ -480,6 +502,10 @@ void PacketReader::xfrBlob(string& blob)
     blob.clear();
 
   d_pos = d_startrecordpos + d_recordlen;
+}
+catch(...)
+{
+  throw std::out_of_range("xfrBlob out of range");
 }
 
 void PacketReader::xfrBlob(string& blob, int length)
@@ -499,8 +525,13 @@ void PacketReader::xfrHexBlob(string& blob, bool keepReading)
   xfrBlob(blob);
 }
 
-string simpleCompress(const string& label, const string& root)
+string simpleCompress(const string& elabel, const string& root)
 {
+  string label=elabel;
+  // FIXME: this relies on the semi-canonical escaped output from getLabelFromContent
+  boost::replace_all(label, "\\.", ".");
+  boost::replace_all(label, "\\032", " ");
+  boost::replace_all(label, "\\\\", "\\"); 
   typedef vector<pair<unsigned int, unsigned int> > parts_t;
   parts_t parts;
   vstringtok(parts, label, ".");
@@ -508,8 +539,8 @@ string simpleCompress(const string& label, const string& root)
   ret.reserve(label.size()+4);
   for(parts_t::const_iterator i=parts.begin(); i!=parts.end(); ++i) {
     if(!root.empty() && !strncasecmp(root.c_str(), label.c_str() + i->first, 1 + label.length() - i->first)) { // also match trailing 0, hence '1 +'
-      const char rootptr[2]={0xc0,0x11};
-      ret.append(rootptr, 2);
+      const unsigned char rootptr[2]={0xc0,0x11};
+      ret.append((const char *) rootptr, 2);
       return ret;
     }
     ret.append(1, (char)(i->second - i->first));
@@ -544,8 +575,8 @@ public:
     uint8_t len; 
     while((len=get8BitInt())) { 
       if(len >= 0xc0) { // extended label
-	get8BitInt();
-	return;
+        get8BitInt();
+        return;
       }
       skipBytes(len);
     }
@@ -627,7 +658,7 @@ void ageDNSPacket(std::string& packet, uint32_t seconds)
       /* uint16_t dnsclass = */ dpm.get16BitInt();
       
       if(dnstype == QType::OPT) // not aging that one with a stick
-	break;
+        break;
       
       dpm.decreaseAndSkip32BitInt(seconds);
       dpm.skipRData();

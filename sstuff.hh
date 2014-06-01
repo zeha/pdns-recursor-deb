@@ -7,13 +7,11 @@
 #include "iputils.hh"
 #include <errno.h>
 #include <sys/types.h>
-#ifndef WIN32
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
-#endif
 #include <fcntl.h>
 #include <stdexcept>
 #include <boost/shared_ptr.hpp>
@@ -33,25 +31,22 @@ public:
 };
 
 
-enum AddressFamily {InterNetwork=AF_INET, InterNetwork6 = AF_INET6}; //!< Supported address families
-enum SocketType {Datagram=SOCK_DGRAM,Stream=SOCK_STREAM}; //!< Supported socket families
 typedef int ProtocolType; //!< Supported protocol types
 
 //! Representation of a Socket and many of the Berkeley functions available
 class Socket : public boost::noncopyable
 {
-private:
-  explicit Socket(int fd)
+  Socket(int fd)
   {
+    d_socket = fd;
     d_buflen=4096;
     d_buffer=new char[d_buflen];
-    d_socket=fd;
   }
+
 public:
-  //! Construct a socket of specified AddressFamily and SocketType.
-  Socket(AddressFamily af, SocketType st, ProtocolType pt=0)
+  //! Construct a socket of specified address family and socket type.
+  Socket(int af, int st, ProtocolType pt=0)
   {
-    d_family=af;
     if((d_socket=(int)socket(af,st, pt))<0)
       throw NetworkError(strerror(errno));
     Utility::setCloseOnExec(d_socket);
@@ -87,6 +82,18 @@ public:
   void setNonBlocking()
   {
     Utility::setNonBlocking(d_socket);
+  }
+  //! Set the socket to blocking
+  void setBlocking()
+  {
+    Utility::setBlocking(d_socket);
+  }
+
+  void setReuseAddr()
+  {
+    int tmp = 1;
+    if (setsockopt(d_socket, SOL_SOCKET, SO_REUSEADDR, (char*)&tmp, static_cast<unsigned>(sizeof tmp))<0)
+      throw NetworkError(string("Setsockopt failed: ")+strerror(errno));
   }
 
   //! Bind the socket to a specified endpoint
@@ -154,14 +161,20 @@ public:
 
 
   //! For datagram sockets, send a datagram to a destination
+  void sendTo(const char* msg, unsigned int len, const ComboAddress &ep)
+  {
+    if(sendto(d_socket, msg, len, 0, (sockaddr *)&ep, ep.getSocklen())<0)
+      throw NetworkError(strerror(errno));
+  }
+
   /** For datagram sockets, send a datagram to a destination
       \param dgram The datagram
       \param ep The intended destination of the datagram */
   void sendTo(const string &dgram, const ComboAddress &ep)
   {
-    if(sendto(d_socket, dgram.c_str(), (int)dgram.size(), 0, (sockaddr *)&ep, ep.getSocklen())<0)
-      throw NetworkError(strerror(errno));
+    sendTo(dgram.c_str(), dgram.length(), ep);
   }
+
 
   //! Write this data to the socket, taking care that all bytes are written out 
   void writen(const string &data)
@@ -218,6 +231,33 @@ public:
     return res;
   }
 
+  void writenWithTimeout(const void *buffer, unsigned int n, int timeout)
+  {
+    unsigned int bytes=n;
+    const char *ptr = (char*)buffer;
+    int ret;
+    while(bytes) {
+      ret=::write(d_socket, ptr, bytes);
+      if(ret < 0) {
+        if(errno==EAGAIN) {
+          ret=waitForRWData(d_socket, false, timeout, 0);
+          if(ret < 0)
+            throw NetworkError("Waiting for data write");
+          if(!ret)
+            throw NetworkError("Timeout writing data");
+          continue;
+        }
+        else
+          throw NetworkError("Writing data: "+stringerror());
+      }
+      if(!ret) {
+        throw NetworkError("Did not fulfill TCP write due to EOF");
+      }
+
+      ptr += ret;
+      bytes -= ret;
+    }
+  }
 
   //! reads one character from the socket 
   int getChar()
@@ -257,7 +297,18 @@ public:
     if(res<0) 
       throw NetworkError("Reading from a socket: "+string(strerror(errno)));
     return res;
+  }
 
+  int readWithTimeout(char* buffer, int n, int timeout)
+  {
+    int err = waitForRWData(d_socket, true, timeout, 0);
+
+    if(err == 0)
+      throw NetworkError("timeout reading");
+    if(err < 0)
+      throw NetworkError("nonblocking read failed: "+string(strerror(errno)));
+
+    return read(buffer, n);
   }
 
   //! Sets the socket to listen with a default listen backlog of 10 bytes 
@@ -277,7 +328,6 @@ private:
   int d_socket;
   char *d_buffer;
   int d_buflen;
-  int d_family;
 };
 
 

@@ -5,7 +5,10 @@
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
     as published by the Free Software Foundation
-    
+
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
 
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -33,6 +36,24 @@ QType::init QType::initializer;
 
 QType::QType()
 {
+}
+
+bool QType::isSupportedType() {
+  for(vector<namenum>::iterator pos=names.begin();pos<names.end();++pos)
+    if(pos->second==code)
+      return true;
+  return false;
+}
+
+bool QType::isMetadataType() {
+  if (code == QType::AXFR ||
+      code == QType::MAILA ||
+      code == QType::MAILB ||
+      code == QType::TSIG ||
+      code == QType::IXFR)
+    return true;
+
+  return false;
 }
 
 uint16_t QType::getCode() const
@@ -78,11 +99,6 @@ QType &QType::operator=(const char *p)
 {
   code=chartocode(p);
   return *this;
-}
-
-bool QType::operator==(const QType &comp) const
-{
-  return(comp.code==code);
 }
 
 QType &QType::operator=(const string &s)

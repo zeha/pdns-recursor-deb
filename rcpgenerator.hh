@@ -6,6 +6,10 @@
     it under the terms of the GNU General Public License version 2 as 
     published by the Free Software Foundation
 
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -22,11 +26,6 @@
 #include <inttypes.h>
 #include <string>
 #include <stdexcept>
-#if !defined SOLARIS8 && !defined WIN32
-
-#elif defined WIN32
-# include "utility.hh"
-#endif
 
 #include "namespaces.hh"
 
@@ -49,6 +48,7 @@ public:
 
   void xfrType(uint16_t& val);
   void xfrIP(uint32_t& val);
+  void xfrIP6(std::string& val);
   void xfrTime(uint32_t& val);
 
   void xfrLabel(string& val, bool compress=false);
@@ -76,6 +76,7 @@ public:
   void xfr16BitInt(const uint16_t& val);
   void xfr8BitInt(const uint8_t& val);
   void xfrIP(const uint32_t& val);
+  void xfrIP6(const std::string& val);
   void xfrTime(const uint32_t& val);
   void xfrBase32HexBlob(const string& val);
 
@@ -84,10 +85,8 @@ public:
   void xfrText(const string& val, bool multi=false);
   void xfrBlob(const string& val, int len=-1);
   void xfrHexBlob(const string& val, bool keepReading=false);
-
+  bool eof() { return true; };
 private:
   string& d_string;
 };
-
-string segmentDNSLabel(const string& input );
 #endif

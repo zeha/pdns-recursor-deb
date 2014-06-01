@@ -6,6 +6,10 @@
     it under the terms of the GNU General Public License version 2 
     as published by the Free Software Foundation
 
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -21,6 +25,10 @@
 #include "zoneparser-tng.hh"
 #include "logger.hh"
 #include "dnsrecords.hh"
+#include <boost/foreach.hpp>
+
+extern int g_argc;
+extern char** g_argv;
 
 void primeHints(void)
 {
@@ -31,8 +39,8 @@ void primeHints(void)
 
   if(::arg()["hint-file"].empty()) {
     static const char*ips[]={"198.41.0.4", "192.228.79.201", "192.33.4.12", "199.7.91.13", "192.203.230.10", "192.5.5.241", 
-        		     "192.112.36.4", "128.63.2.53",
-        		     "192.36.148.17","192.58.128.30", "193.0.14.129", "199.7.83.42", "202.12.27.33"};
+                             "192.112.36.4", "128.63.2.53",
+                             "192.36.148.17","192.58.128.30", "193.0.14.129", "199.7.83.42", "202.12.27.33"};
     static const char *ip6s[]={
       "2001:503:ba3e::2:30", NULL, NULL, "2001:500:2d::d", NULL,
       "2001:500:2f::f", NULL, "2001:500:1::803f:235", "2001:7fe::53",
@@ -91,6 +99,8 @@ void primeHints(void)
 static void makeNameToIPZone(SyncRes::domainmap_t* newMap, const string& hostname, const string& ip)
 {
   SyncRes::AuthDomain ad;
+  ad.d_rdForward=false;
+
   DNSResourceRecord rr;
   rr.qname=toCanonic("", hostname);
   rr.d_place=DNSResourceRecord::ANSWER;
@@ -126,6 +136,8 @@ static void makeIPToNamesZone(SyncRes::domainmap_t* newMap, const vector<string>
   stringtok(ipparts, address,".");
   
   SyncRes::AuthDomain ad;
+  ad.d_rdForward=false;
+
   DNSResourceRecord rr;
   for(int n=ipparts.size()-1; n>=0 ; --n) {
     rr.qname.append(ipparts[n]);
@@ -234,7 +246,7 @@ string reloadAuthAndForwards()
   
     for(SyncRes::domainmap_t::const_iterator i = t_sstorage->domainmap->begin(); i != t_sstorage->domainmap->end(); ++i) {
       for(SyncRes::AuthDomain::records_t::const_iterator j = i->second.d_records.begin(); j != i->second.d_records.end(); ++j) 
-	broadcastAccFunction<uint64_t>(boost::bind(pleaseWipeCache, j->qname));
+        broadcastAccFunction<uint64_t>(boost::bind(pleaseWipeCache, j->qname));
     }
 
     string configname=::arg()["config-dir"]+"/recursor.conf";
@@ -242,18 +254,40 @@ string reloadAuthAndForwards()
     
     if(!::arg().preParseFile(configname.c_str(), "forward-zones")) 
       L<<Logger::Warning<<"Unable to re-parse configuration file '"<<configname<<"'"<<endl;
-    
     ::arg().preParseFile(configname.c_str(), "forward-zones-file");
+    ::arg().preParseFile(configname.c_str(), "forward-zones-recurse");
     ::arg().preParseFile(configname.c_str(), "auth-zones");
     ::arg().preParseFile(configname.c_str(), "export-etc-hosts", "off");
     ::arg().preParseFile(configname.c_str(), "serve-rfc1918");
+    ::arg().preParseFile(configname.c_str(), "include-dir");
+    ::arg().preParse(g_argc, g_argv, "include-dir");
+
+    // then process includes
+    std::vector<std::string> extraConfigs;
+    ::arg().gatherIncludes(extraConfigs);
+
+    BOOST_FOREACH(const std::string& fn, extraConfigs) {
+      ::arg().preParseFile(fn.c_str(), "forward-zones", ::arg()["forward-zones"]);
+      ::arg().preParseFile(fn.c_str(), "forward-zones-file", ::arg()["forward-zones-file"]);
+      ::arg().preParseFile(fn.c_str(), "forward-zones-recurse", ::arg()["forward-zones-recurse"]);
+      ::arg().preParseFile(fn.c_str(), "auth-zones",::arg()["auth-zones"]);
+      ::arg().preParseFile(fn.c_str(), "export-etc-hosts",::arg()["export-etc-hosts"]);
+      ::arg().preParseFile(fn.c_str(), "serve-rfc1918",::arg()["serve-rfc1918"]);
+    }
+
+    ::arg().preParse(g_argc, g_argv, "forward-zones");
+    ::arg().preParse(g_argc, g_argv, "forward-zones-file");
+    ::arg().preParse(g_argc, g_argv, "forward-zones-recurse");
+    ::arg().preParse(g_argc, g_argv, "auth-zones");
+    ::arg().preParse(g_argc, g_argv, "export-etc-hosts");
+    ::arg().preParse(g_argc, g_argv, "serve-rfc1918");
 
     SyncRes::domainmap_t* newDomainMap = parseAuthAndForwards();
     
     // purge again - new zones need to blank out the cache
     for(SyncRes::domainmap_t::const_iterator i = newDomainMap->begin(); i != newDomainMap->end(); ++i) {
       for(SyncRes::AuthDomain::records_t::const_iterator j = i->second.d_records.begin(); j != i->second.d_records.end(); ++j) 
-	broadcastAccFunction<uint64_t>(boost::bind(pleaseWipeCache, j->qname));
+        broadcastAccFunction<uint64_t>(boost::bind(pleaseWipeCache, j->qname));
     }
 
     // this is pretty blunt
@@ -265,7 +299,7 @@ string reloadAuthAndForwards()
   catch(std::exception& e) {
     L<<Logger::Error<<"Had error reloading zones, keeping original data: "<<e.what()<<endl;
   }
-  catch(AhuException& ae) {
+  catch(PDNSException& ae) {
     L<<Logger::Error<<"Encountered error reloading zones, keeping original data: "<<ae.reason<<endl;
   }
   catch(...) {
@@ -294,6 +328,7 @@ SyncRes::domainmap_t* parseAuthAndForwards()
       trim(headers.second);
       headers.first=toCanonic("", headers.first);
       if(n==0) {
+        ad.d_rdForward = false;
         L<<Logger::Error<<"Parsing authoritative data for zone '"<<headers.first<<"' from file '"<<headers.second<<"'"<<endl;
         ZoneParserTNG zpt(headers.second, headers.first);
         DNSResourceRecord rr;
@@ -304,11 +339,11 @@ SyncRes::domainmap_t* parseAuthAndForwards()
           }
           catch(std::exception &e) {
             delete newMap;
-            throw AhuException("Error parsing record '"+rr.qname+"' of type "+rr.qtype.getName()+" in zone '"+headers.first+"' from file '"+headers.second+"': "+e.what());
+            throw PDNSException("Error parsing record '"+rr.qname+"' of type "+rr.qtype.getName()+" in zone '"+headers.first+"' from file '"+headers.second+"': "+e.what());
           }
           catch(...) {
             delete newMap;
-            throw AhuException("Error parsing record '"+rr.qname+"' of type "+rr.qtype.getName()+" in zone '"+headers.first+"' from file '"+headers.second+"'");
+            throw PDNSException("Error parsing record '"+rr.qname+"' of type "+rr.qtype.getName()+" in zone '"+headers.first+"' from file '"+headers.second+"'");
           }
 
           ad.d_records.insert(rr);
@@ -318,14 +353,14 @@ SyncRes::domainmap_t* parseAuthAndForwards()
         L<<Logger::Error<<"Redirecting queries for zone '"<<headers.first<<"' ";
         if(n == 2) {
           L<<"with recursion ";
-          ad.d_rdForward = 1;
+          ad.d_rdForward = true;
         }
-        else ad.d_rdForward = 0;
+        else ad.d_rdForward = false;
         L<<"to: ";
         
         convertServersForAD(headers.second, ad, ";");
         if(n == 2) {
-          ad.d_rdForward = 1;
+          ad.d_rdForward = true;
         }
       }
       
@@ -340,7 +375,7 @@ SyncRes::domainmap_t* parseAuthAndForwards()
 
     if(!rfp) {
       delete newMap;
-      throw AhuException("Error opening forward-zones-file '"+::arg()["forward-zones-file"]+"': "+stringerror());
+      throw PDNSException("Error opening forward-zones-file '"+::arg()["forward-zones-file"]+"': "+stringerror());
     }
 
     shared_ptr<FILE> fp=shared_ptr<FILE>(rfp, fclose);
@@ -364,7 +399,7 @@ SyncRes::domainmap_t* parseAuthAndForwards()
         ad.d_rdForward = false;
       if(domain.empty()) {
         delete newMap;
-        throw AhuException("Error parsing line "+lexical_cast<string>(linenum)+" of " +::arg()["forward-zones-file"]);
+        throw PDNSException("Error parsing line "+lexical_cast<string>(linenum)+" of " +::arg()["forward-zones-file"]);
       }
 
       try {
@@ -372,7 +407,7 @@ SyncRes::domainmap_t* parseAuthAndForwards()
       }
       catch(...) {
         delete newMap;
-        throw AhuException("Conversion error parsing line "+lexical_cast<string>(linenum)+" of " +::arg()["forward-zones-file"]);
+        throw PDNSException("Conversion error parsing line "+lexical_cast<string>(linenum)+" of " +::arg()["forward-zones-file"]);
       }
 
       (*newMap)[toCanonic("", domain)]=ad;
@@ -392,28 +427,28 @@ SyncRes::domainmap_t* parseAuthAndForwards()
       string searchSuffix = ::arg()["export-etc-hosts-search-suffix"];
       string::size_type pos;
       while(getline(ifs,line)) {
-	pos=line.find('#');
-	if(pos!=string::npos)
-	  line.resize(pos);
-	trim(line);
-	if(line.empty())
-	  continue;
-	parts.clear();
-	stringtok(parts, line, "\t\r\n ");
-	if(parts[0].find(':')!=string::npos)
-	  continue;
-	
-	for(unsigned int n=1; n < parts.size(); ++n) {
-	  if(searchSuffix.empty() || parts[n].find('.') != string::npos)
-  	    makeNameToIPZone(newMap, parts[n], parts[0]);
-	  else {
-  	    string canonic=toCanonic(searchSuffix, parts[n]);
-  	    if(canonic != parts[n]) {
-	      makeNameToIPZone(newMap, canonic, parts[0]);
+        pos=line.find('#');
+        if(pos!=string::npos)
+          line.resize(pos);
+        trim(line);
+        if(line.empty())
+          continue;
+        parts.clear();
+        stringtok(parts, line, "\t\r\n ");
+        if(parts[0].find(':')!=string::npos)
+          continue;
+        
+        for(unsigned int n=1; n < parts.size(); ++n) {
+          if(searchSuffix.empty() || parts[n].find('.') != string::npos)
+              makeNameToIPZone(newMap, parts[n], parts[0]);
+          else {
+              string canonic=toCanonic(searchSuffix, parts[n]);
+              if(canonic != parts[n]) {
+              makeNameToIPZone(newMap, canonic, parts[0]);
             }
           }
         }
-	makeIPToNamesZone(newMap, parts);
+        makeIPToNamesZone(newMap, parts);
       }
     }
   }

@@ -1,10 +1,11 @@
 # user editable stuff:
 SBINDIR=/usr/sbin/
 BINDIR=/usr/bin/
-CONFIGDIR="/etc/powerdns/"
+SYSCONFDIR=/etc/powerdns/
+LOCALSTATEDIR=/var/run/
 OPTFLAGS?=-O3
-CXXFLAGS:= $(CXXFLAGS) -Iext/rapidjson/include -Wall $(OPTFLAGS) $(PROFILEFLAGS) $(ARCHFLAGS) -pthread
-CFLAGS:=$(CFLAGS) -Wall $(OPTFLAGS) $(PROFILEFLAGS) $(ARCHFLAGS) -pthread
+CXXFLAGS:= $(CXXFLAGS) -Iext/rapidjson/include -I$(CURDIR)/ext/polarssl-1.3.2/include -Wall $(OPTFLAGS) $(PROFILEFLAGS) $(ARCHFLAGS) -pthread -Iext/yahttp
+CFLAGS:=$(CFLAGS) -Wall $(OPTFLAGS) $(PROFILEFLAGS) $(ARCHFLAGS) -I$(CURDIR)/ext/polarssl-1.3.2/include -pthread
 LDFLAGS:=$(LDFLAGS) $(ARCHFLAGS) -pthread
 
 LINKCC=$(CXX)
@@ -18,15 +19,17 @@ PDNS_RECURSOR_OBJECTS=syncres.o  misc.o unix_utility.o qtype.o logger.o  \
 arguments.o lwres.o pdns_recursor.o recursor_cache.o dnsparser.o \
 dnswriter.o dnsrecords.o rcpgenerator.o base64.o zoneparser-tng.o \
 rec_channel.o rec_channel_rec.o selectmplexer.o sillyrecords.o \
-dns_random.o aescrypt.o aeskey.o aes_modes.o aestab.o dnslabeltext.o \
+dns_random.o ext/polarssl-1.3.2/library/aes.o ext/polarssl-1.3.2/library/padlock.o dnslabeltext.o \
 lua-pdns.o lua-recursor.o randomhelper.o recpacketcache.o dns.o \
-reczones.o base32.o nsecrecords.o json.o json_ws.o
+reczones.o base32.o nsecrecords.o json.o ws-recursor.o ws-api.o \
+version.o responsestats.o webserver.o ext/yahttp/yahttp/reqresp.o \
+rec-carbon.o
 
 REC_CONTROL_OBJECTS=rec_channel.o rec_control.o arguments.o misc.o \
 	unix_utility.o logger.o qtype.o
 
 # what we need 
-all: message pdns_recursor rec_control 
+all: message version_generated.h build
 
 # OS specific instructions
 -include sysdeps/$(shell uname).inc
@@ -53,6 +56,26 @@ endif
 
 LDFLAGS += $(PROFILEFLAGS) $(STATICFLAGS)
 
+CXXFLAGS += -DSYSCONFDIR='"$(SYSCONFDIR)"' -DLOCALSTATEDIR='"$(LOCALSTATEDIR)"'
+CFLAGS += -DSYSCONFDIR='"$(SYSCONFDIR)"' -DLOCALSTATEDIR='"$(LOCALSTATEDIR)"'
+
+%.cc: %.rl
+	ragel $< -o $@
+
+# Version
+build_date=$(shell LC_TIME=C date '+%Y%m%d%H%M%S')
+build_host=$(shell id -u -n)@$(shell hostname -f)
+
+.PHONY: version_generated.h
+version_generated.h:
+	echo '#ifndef VERSION_GENERATED_H' > $@
+	echo '#define VERSION_GENERATED_H' >> $@
+	echo '#include "config.h"' >> $@
+	echo '#define PDNS_VERSION VERSION' >> $@
+	echo '#define BUILD_DATE "$(build_date)"' >> $@
+	echo '#define BUILD_HOST "$(build_host)"' >> $@
+	echo '#endif //!VERSION_GENERATED_H' >> $@
+
 message: 
 	@echo
 	@echo PLEASE READ: If you get an error mentioning \#include '<boost/something.hpp>', please read README
@@ -70,15 +93,15 @@ basic_checks:
 		rm -f dep ; \
 	 fi
 
-install: all
+install: build-stamp
 	-mkdir -p $(DESTDIR)/$(SBINDIR)
 	mv pdns_recursor $(DESTDIR)/$(SBINDIR)
 	strip $(DESTDIR)/$(SBINDIR)/pdns_recursor
 	mkdir -p $(DESTDIR)/$(BINDIR)
 	mv rec_control $(DESTDIR)/$(BINDIR)
 	strip $(DESTDIR)/$(BINDIR)/rec_control
-	-mkdir -p $(DESTDIR)/$(CONFIGDIR)
-	$(DESTDIR)/$(SBINDIR)/pdns_recursor --config > $(DESTDIR)/$(CONFIGDIR)/recursor.conf-dist
+	-mkdir -p $(DESTDIR)/$(SYSCONFDIR)
+	$(DESTDIR)/$(SBINDIR)/pdns_recursor --config > $(DESTDIR)/$(SYSCONFDIR)/recursor.conf-dist
 	-mkdir -p $(DESTDIR)/usr/share/man/man1
 	cp pdns_recursor.1 rec_control.1 $(DESTDIR)/usr/share/man/man1
 	$(OS_SPECIFIC_INSTALL)	
@@ -87,10 +110,10 @@ clean: binclean
 	-rm -f dep *~ *.gcda *.gcno optional/*.gcda optional/*.gcno
 
 binclean:
-	-rm -f *.o  pdns_recursor rec_control optional/*.o
-	
+	-rm -f *.o  pdns_recursor rec_control optional/*.o build-stamp ext/polarssl-1.3.2/library/*.o ext/yahttp/yahttp/*.o
+
 dep:
-	$(CXX) $(CXXFLAGS) -MM -MG *.cc *.c *.hh > $@
+	$(CXX) $(CXXFLAGS) -MM -MG *.cc *.hh > $@
 
 -include dep
 
@@ -102,4 +125,10 @@ pdns_recursor: optional $(OPTIONALS) $(PDNS_RECURSOR_OBJECTS)
 
 rec_control: $(REC_CONTROL_OBJECTS)
 	$(LINKCC) $(REC_CONTROL_OBJECTS) $(LDFLAGS) -o $@
+
+build-stamp:
+	$(MAKE) build
+
+build: pdns_recursor rec_control
+	touch build-stamp
 

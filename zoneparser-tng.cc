@@ -6,6 +6,10 @@
     it under the terms of the GNU General Public License version 2 
     as published by the Free Software Foundation
 
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -30,8 +34,8 @@
 #include <boost/lexical_cast.hpp>
 
 ZoneParserTNG::ZoneParserTNG(const string& fname, const string& zname, const string& reldir) : d_reldir(reldir), 
-        										       d_zonename(zname), d_defaultttl(3600), 
-        										       d_havedollarttl(false)
+                                                                                               d_zonename(zname), d_defaultttl(3600), 
+                                                                                               d_havedollarttl(false)
 {
   d_zonename = toCanonic("", d_zonename);
   stackFile(fname);
@@ -226,14 +230,17 @@ string ZoneParserTNG::getLineOfFile()
 }
 
 // ODD: this function never fills out the prio field! rest of pdns compensates though
-bool ZoneParserTNG::get(DNSResourceRecord& rr) 
+bool ZoneParserTNG::get(DNSResourceRecord& rr, std::string* comment) 
 {
  retry:;
   if(!getTemplateLine() && !getLine())
     return false;
 
   boost::trim_right_if(d_line, is_any_of(" \r\n\x1a"));
-
+  if(comment)
+    comment->clear();
+  if(comment && d_line.find(';') != string::npos)
+    *comment = d_line.substr(d_line.find(';'));
   parts_t parts;
   vstringtok(parts, d_line);
 
@@ -310,8 +317,9 @@ bool ZoneParserTNG::get(DNSResourceRecord& rr)
     if(nextpart.empty())
       break;
 
-    if(nextpart.find(';')!=string::npos)
+    if(nextpart.find(';')!=string::npos) {
       break;
+    }
 
     // cout<<"Next part: '"<<nextpart<<"'"<<endl;
     
@@ -336,8 +344,8 @@ bool ZoneParserTNG::get(DNSResourceRecord& rr)
     }
     catch(...) {
       throw runtime_error("Parsing zone content "+getLineOfFile()+
-        		  ": '"+nextpart+
-        		  "' doesn't look like a qtype, stopping loop");
+                          ": '"+nextpart+
+                          "' doesn't look like a qtype, stopping loop");
     }
   }
   if(!haveQTYPE) 
@@ -388,7 +396,8 @@ bool ZoneParserTNG::get(DNSResourceRecord& rr)
   case QType::SRV:
     stringtok(recparts, rr.content);
     if(recparts.size()==4) {
-      recparts[3] = stripDot(toCanonic(d_zonename, recparts[3]));
+      if(recparts[3]!=".")
+        recparts[3] = stripDot(toCanonic(d_zonename, recparts[3]));
       rr.content=recparts[0]+" "+recparts[1]+" "+recparts[2]+" "+recparts[3];
     }
     break;
@@ -396,6 +405,7 @@ bool ZoneParserTNG::get(DNSResourceRecord& rr)
     
   case QType::NS:
   case QType::CNAME:
+  case QType::DNAME:
   case QType::PTR:
   case QType::AFSDB:
     rr.content=stripDot(toCanonic(d_zonename, rr.content));

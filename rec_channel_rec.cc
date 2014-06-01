@@ -18,13 +18,12 @@
 #include "logger.hh"
 #include "dnsparser.hh"
 #include "arguments.hh"
-#ifndef WIN32
 #include <sys/resource.h>
 #include <sys/time.h>
-#endif
+#include "responsestats.hh"
 
 #include "namespaces.hh"
-#include "namespaces.hh"
+
 map<string, const uint32_t*> d_get32bitpointers;
 map<string, const uint64_t*> d_get64bitpointers;
 map<string, function< uint32_t() > >  d_get32bitmembers;
@@ -70,7 +69,9 @@ map<string,string> getAllStatsMap()
   BOOST_FOREACH(the64bits, d_get64bitpointers) {
     ret.insert(make_pair(the64bits.first, lexical_cast<string>(*the64bits.second)));
   }
-  BOOST_FOREACH(the32bitmembers, d_get32bitmembers) {
+  BOOST_FOREACH(the32bitmembers, d_get32bitmembers) { 
+    if(the32bitmembers.first == "cache-bytes" || the32bitmembers.first=="packetcache-bytes")
+      continue; // too slow for 'get-all'
     ret.insert(make_pair(the32bitmembers.first, lexical_cast<string>(the32bitmembers.second())));
   }
   return ret;
@@ -245,7 +246,16 @@ string doWipeCache(T begin, T end)
   return "wiped "+lexical_cast<string>(count)+" records, "+lexical_cast<string>(countNeg)+" negative records\n";
 }
 
-#ifndef WIN32
+template<typename T>
+string setMinimumTTL(T begin, T end)
+{
+  if(end-begin != 1) 
+    return "Need to supply new minimum TTL number\n";
+  SyncRes::s_minimumTTL = atoi(begin->c_str());
+  return "New minimum TTL: " + lexical_cast<string>(SyncRes::s_minimumTTL) + "\n";
+}
+
+
 static uint64_t getSysTimeMsec()
 {
   struct rusage ru;
@@ -259,7 +269,6 @@ static uint64_t getUserTimeMsec()
   getrusage(RUSAGE_SELF, &ru);
   return (ru.ru_utime.tv_sec*1000ULL + ru.ru_utime.tv_usec/1000);
 }
-#endif
 
 static uint64_t calculateUptime()
 {
@@ -314,6 +323,16 @@ uint64_t getNegCacheSize()
   return broadcastAccFunction<uint64_t>(pleaseGetNegCacheSize);
 }
 
+uint64_t* pleaseGetFailedHostsSize()
+{
+  uint64_t tmp=t_sstorage->fails.size();
+  return new uint64_t(tmp);
+}
+uint64_t getFailedHostsSize()
+{
+  return broadcastAccFunction<uint64_t>(pleaseGetFailedHostsSize);
+}
+
 uint64_t* pleaseGetNsSpeedsSize()
 {
   return new uint64_t(t_sstorage->nsSpeeds.size());
@@ -349,6 +368,12 @@ uint64_t doGetCacheSize()
 {
   return broadcastAccFunction<uint64_t>(pleaseGetCacheSize);
 }
+
+uint64_t doGetAvgLatencyUsec()
+{
+  return (uint64_t) g_stats.avgLatencyUsec;
+}
+
 
 uint64_t doGetCacheBytes()
 {
@@ -426,8 +451,15 @@ uint64_t doGetMallocated()
   return 0;
 }
 
+extern ResponseStats g_rs;
+
+bool RecursorControlParser::s_init;
 RecursorControlParser::RecursorControlParser()
 {
+  if(s_init)
+    return;
+  s_init=true;
+
   addGetStat("questions", &g_stats.qcounter);
   addGetStat("ipv6-questions", &g_stats.ipv6qcounter);
   addGetStat("tcp-questions", &g_stats.tcpqcounter);
@@ -461,7 +493,7 @@ RecursorControlParser::RecursorControlParser()
   addGetStat("answers100-1000", &g_stats.answers100_1000);
   addGetStat("answers-slow", &g_stats.answersSlow);
 
-  addGetStat("qa-latency", &g_stats.avgLatencyUsec);
+  addGetStat("qa-latency", doGetAvgLatencyUsec);
   addGetStat("unexpected-packets", &g_stats.unexpectedCount);
   addGetStat("case-mismatches", &g_stats.caseMismatchCount);
   addGetStat("spoof-prevents", &g_stats.spoofCount);
@@ -478,6 +510,7 @@ RecursorControlParser::RecursorControlParser()
   addGetStat("throttle-entries", boost::bind(getThrottleSize)); 
 
   addGetStat("nsspeeds-entries", boost::bind(getNsSpeedsSize));
+  addGetStat("failed-host-entries", boost::bind(getFailedHostsSize));
 
   addGetStat("concurrent-queries", boost::bind(getConcurrentQueries)); 
   addGetStat("outgoing-timeouts", &SyncRes::s_outgoingtimeouts);
@@ -499,11 +532,9 @@ RecursorControlParser::RecursorControlParser()
 
   addGetStat("uptime", calculateUptime);
 
-#ifndef WIN32
   //  addGetStat("query-rate", getQueryRate);
   addGetStat("user-msec", getUserTimeMsec);
   addGetStat("sys-msec", getSysTimeMsec);
-#endif
 }
 
 static void doExitGeneric(bool nicely)
@@ -596,6 +627,8 @@ string RecursorControlParser::getAnswer(const string& question, RecursorControlP
 "get [key1] [key2] ..             get specific statistics\n"
 "get-all                          get all statistics\n"
 "get-parameter [key1] [key2] ..   get configuration parameters\n"
+"get-qtypelist                    get QType statistics\n"
+"                                 notice: queries from cache aren't being counted yet\n"
 "help                             get this list\n"
 "ping                             check that all threads are alive\n"
 "quit                             stop the recursor daemon\n"
@@ -603,6 +636,7 @@ string RecursorControlParser::getAnswer(const string& question, RecursorControlP
 "reload-acls                      reload ACLS\n"
 "reload-lua-script [filename]     (re)load Lua script\n"
 "reload-zones                     reload all auth and forward zones\n"
+"set-minimum-ttl value            set mininum-ttl-override\n"
 "trace-regex regex                emit resolution trace for matching queries\n"
 "top-remotes                      show top remotes\n"
 "unload-lua-script                unload Lua script\n"
@@ -660,9 +694,9 @@ string RecursorControlParser::getAnswer(const string& question, RecursorControlP
       L<<Logger::Error<<"reloading ACLs failed (Exception: "<<e.what()<<")"<<endl;
       return e.what() + string("\n");
     }
-    catch(AhuException& ae)
+    catch(PDNSException& ae)
     {
-      L<<Logger::Error<<"reloading ACLs failed (AhuException: "<<ae.reason<<")"<<endl;
+      L<<Logger::Error<<"reloading ACLs failed (PDNSException: "<<ae.reason<<")"<<endl;
       return ae.reason + string("\n");
     }
     return "ok\n";
@@ -681,6 +715,14 @@ string RecursorControlParser::getAnswer(const string& question, RecursorControlP
 
   if(cmd=="reload-zones") {
     return reloadAuthAndForwards();
+  }
+
+  if(cmd=="set-minimum-ttl") {
+    return setMinimumTTL(begin, end);
+  }
+  
+  if(cmd=="get-qtypelist") {
+    return g_rs.getQTypeReport();
   }
   
   return "Unknown command '"+cmd+"', try 'help'\n";

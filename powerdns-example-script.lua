@@ -1,12 +1,36 @@
+pdnslog("pdns-recursor starting!", pdns.loglevels.Info)
+function endswith(s, send)
+	 return #s >= #send and s:find(send, #s-#send+1, true) and true or false
+end
+
 function preresolve ( remoteip, domain, qtype )
+
 	print ("prequery handler called for: ", remoteip, getlocaladdress(), domain, qtype)
-	pdnslog("a test message.. received query from "..remoteip.." on "..getlocaladdress());
+	pdnslog("a test message.. received query from "..remoteip.." on "..getlocaladdress(), pdns.loglevels.Info);
+
+	if endswith(domain, "f.f.7.7.b.1.2.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.e.f.ip6.arpa.")
+	then
+		print("This is our faked AAAA record in reverse")
+		return "getFakePTRRecords", domain, "fe80::21b::77ff:0:0"
+	end
+
+	if domain == "www.followme.com."
+	then
+		print ("Need to CNAME www.followme.com to www.powerdns.com")
+		return "followCNAMERecords", 0, {{qtype=pdns.CNAME, content="www.powerdns.com"}}
+	end
+
+	if domain == "www.donotanswer.org."
+	then
+		print("we won't answer a query for donotanswer.org")
+		return pdns.DROP, {}
+	end
 
 	if domain == "www.donotcache.org."
 	then
-		print("making sure www.donotcache.org will never end up in the cache")
+		print("making sure www.donotcache.org will never end up in the cache", pdns.loglevels.Debug)
 		setvariable()
-		return -1, {}
+		return pdns.PASS, {}
 	end
 
 	if domain == "www.powerdns.org." 
@@ -29,14 +53,20 @@ function preresolve ( remoteip, domain, qtype )
 		return 0, {{qtype=pdns.AAAA, content=remoteip}}
 	else
 		print "not dealing!"
-		return -1, {}
+		return pdns.PASS, {}
 	end
 end
 
 function nxdomain ( remoteip, domain, qtype )
 	print ("nxhandler called for: ", remoteip, getlocaladdress(), domain, qtype, pdns.AAAA)
-	if qtype ~= pdns.A then return -1, {} end  --  only A records
-	if not string.find(domain, "^www%.") then return -1, {} end  -- only things that start with www.
+	if qtype ~= pdns.A then 
+    pdnslog("Only A records", pdns.loglevels.Error)
+	return pdns.PASS, {} 
+	end  --  only A records
+	if not string.find(domain, "^www%.") then 
+    pdnslog("Only strings that start with www.", pdns.loglevels.Error)
+	return pdns.PASS, {} 
+	end  -- only things that start with www.
 	
 	setvariable()
 	if matchnetmask(remoteip, {"127.0.0.1/32", "10.1.0.0/16"}) 
@@ -50,7 +80,7 @@ function nxdomain ( remoteip, domain, qtype )
 		return 0, ret
 	else
 		print "not dealing"
-		return -1, ret
+		return pdns.PASS, ret
 	end
 end
 
@@ -58,7 +88,7 @@ function axfrfilter(remoteip, zone, qname, qtype, ttl, priority, content)
 	if qtype ~= pdns.SOA or zone ~= "secured-by-gost.org"
 	then
 		ret = {}
-		return -1, ret
+		return pdns.PASS, ret
 	end
 
 	print "got soa!"
@@ -70,15 +100,15 @@ end
 
 function nodata ( remoteip, domain, qtype, records )
 	print ("nodata called for: ", remoteip, getlocaladdress(), domain, qtype)
-	if qtype ~= pdns.AAAA then return -1, {} end  --  only AAAA records
+	if qtype ~= pdns.AAAA then return pdns.PASS, {} end  --  only AAAA records
 
 	setvariable()
-    return "getFakeAAAARecords", domain, "fe80::21b:77ff:0:0"
+    	return "getFakeAAAARecords", domain, "fe80::21b:77ff:0:0"
 end	
 
 -- records contains the entire packet, ready for your modifying pleasure
 function postresolve ( remoteip, domain, qtype, records, origrcode )
-	print ("postresolve called for: ", remoteip, getlocaladdress(), domain, qtype, origrcode)
+	print ("postresolve called for: ", remoteip, getlocaladdress(), domain, qtype, origrcode, pdns.loglevels.Info)
 
 	for key,val in ipairs(records) 
 	do
@@ -104,15 +134,15 @@ function prequery ( dnspacket )
 	pdnslog ("q: ".. qname.." "..qtype)
 	if qtype == pdns.A and qname == "www.domain.com" 
 	then
-		pdnslog ("calling dnspacket:setRcode")
+		pdnslog ("calling dnspacket:setRcode", pdns.loglevels.Debug)
 		dnspacket:setRcode(pdns.NXDOMAIN)
-		pdnslog ("called dnspacket:setRcode")
-		pdnslog ("adding records")
+		pdnslog ("called dnspacket:setRcode", pdns.loglevels.Debug)
+		pdnslog ("adding records", pdns.loglevels.Debug)
 		ret = {}
 		ret[1] = {qname=qname, qtype=qtype, content="1.2.3.4", place=2}
 		ret[2] = {qname=qname, qtype=pdns.TXT, content=os.date("Retrieved at %Y-%m-%d %H:%M"), ttl=ttl}
 		dnspacket:addRecords(ret)
-		pdnslog ("returning true")
+		pdnslog ("returning true", pdns.loglevels.Debug)
 		return true
 	end
 	pdnslog ("returning false")

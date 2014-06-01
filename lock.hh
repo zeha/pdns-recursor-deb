@@ -5,7 +5,10 @@
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
     as published by the Free Software Foundation
-    
+
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
 
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -22,7 +25,7 @@
 #include <pthread.h>
 #include <errno.h>
 #include "misc.hh"
-#include "ahuexception.hh"
+#include "pdnsexception.hh"
 
 extern bool g_singleThreaded;
 
@@ -36,7 +39,7 @@ public:
     if(g_singleThreaded)
       return;
     if((errno=pthread_mutex_lock(d_lock)))
-      throw AhuException("error acquiring lock: "+stringerror());
+      throw PDNSException("error acquiring lock: "+stringerror());
   }
   ~Lock()
   {
@@ -58,7 +61,7 @@ public:
       return;
 
     if((errno=pthread_rwlock_wrlock(d_lock))) {
-      throw AhuException("error acquiring rwlock wrlock: "+stringerror());
+      throw PDNSException("error acquiring rwlock wrlock: "+stringerror());
     }
   }
   ~WriteLock()
@@ -85,7 +88,7 @@ public:
 
     d_havelock=false;
     if((errno=pthread_rwlock_trywrlock(d_lock)) && errno!=EBUSY)
-      throw AhuException("error acquiring rwlock tryrwlock: "+stringerror());
+      throw PDNSException("error acquiring rwlock tryrwlock: "+stringerror());
     d_havelock=(errno==0);
   }
   ~TryWriteLock()
@@ -119,7 +122,7 @@ public:
     }
 
     if((errno=pthread_rwlock_tryrdlock(d_lock)) && errno!=EBUSY)
-      throw AhuException("error acquiring rwlock tryrdlock: "+stringerror());
+      throw PDNSException("error acquiring rwlock tryrdlock: "+stringerror());
     d_havelock=(errno==0);
   }
   ~TryReadLock()
@@ -151,7 +154,7 @@ public:
       return;
 
     if((errno=pthread_rwlock_rdlock(d_lock)))
-      throw AhuException("error acquiring rwlock tryrwlock: "+stringerror());
+      throw PDNSException("error acquiring rwlock tryrwlock: "+stringerror());
   }
   ~ReadLock()
   {

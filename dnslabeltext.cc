@@ -30,14 +30,13 @@ static const char _dnstext_actions[] = {
 };
 
 static const char _dnstext_key_offsets[] = {
-	0, 0, 1, 7, 9, 11, 13, 19, 
-	23
+	0, 0, 1, 3, 5, 7, 9, 11, 
+	15
 };
 
-static const char _dnstext_trans_keys[] = {
-	34, 34, 92, 9, 10, 32, 126, 48, 
-	57, 48, 57, 48, 57, 34, 92, 9, 
-	10, 32, 126, 32, 34, 9, 13, 34, 
+static const unsigned char _dnstext_trans_keys[] = {
+	34u, 34u, 92u, 48u, 57u, 48u, 57u, 48u, 
+	57u, 34u, 92u, 32u, 34u, 9u, 13u, 34u, 
 	0
 };
 
@@ -47,27 +46,25 @@ static const char _dnstext_single_lengths[] = {
 };
 
 static const char _dnstext_range_lengths[] = {
-	0, 0, 2, 1, 1, 1, 2, 1, 
+	0, 0, 0, 1, 1, 1, 0, 1, 
 	0
 };
 
 static const char _dnstext_index_offsets[] = {
-	0, 0, 2, 7, 9, 11, 13, 18, 
-	22
+	0, 0, 2, 5, 7, 9, 11, 14, 
+	18
 };
 
 static const char _dnstext_trans_targs[] = {
-	2, 0, 7, 3, 2, 2, 0, 4, 
-	2, 5, 0, 6, 0, 7, 3, 2, 
-	2, 0, 8, 2, 8, 0, 2, 0, 
-	0
+	2, 0, 7, 3, 2, 4, 2, 5, 
+	0, 6, 0, 7, 3, 2, 8, 2, 
+	8, 0, 2, 0, 0
 };
 
 static const char _dnstext_trans_actions[] = {
-	3, 0, 0, 0, 11, 11, 0, 7, 
-	5, 7, 0, 7, 0, 9, 9, 16, 
-	16, 0, 0, 13, 0, 0, 13, 0, 
-	0
+	3, 0, 0, 0, 11, 7, 5, 7, 
+	0, 7, 0, 9, 9, 16, 0, 13, 
+	0, 0, 13, 0, 0
 };
 
 static const char _dnstext_eof_actions[] = {
@@ -82,7 +79,7 @@ static const int dnstext_error = 0;
 static const int dnstext_en_main = 1;
 
 
-#line 25 "dnslabeltext.rl"
+#line 26 "dnslabeltext.rl"
 
 	(void)dnstext_error;  // silence warnings
 	(void)dnstext_en_main;
@@ -95,18 +92,18 @@ static const int dnstext_en_main = 1;
         vector<string> ret;
 
         
-#line 99 "dnslabeltext.cc"
+#line 96 "dnslabeltext.cc"
 	{
 	cs = dnstext_start;
 	}
 
-#line 104 "dnslabeltext.cc"
+#line 101 "dnslabeltext.cc"
 	{
 	int _klen;
 	unsigned int _trans;
 	const char *_acts;
 	unsigned int _nacts;
-	const char *_keys;
+	const unsigned char *_keys;
 
 	if ( p == pe )
 		goto _test_eof;
@@ -118,9 +115,9 @@ _resume:
 
 	_klen = _dnstext_single_lengths[cs];
 	if ( _klen > 0 ) {
-		const char *_lower = _keys;
-		const char *_mid;
-		const char *_upper = _keys + _klen - 1;
+		const unsigned char *_lower = _keys;
+		const unsigned char *_mid;
+		const unsigned char *_upper = _keys + _klen - 1;
 		while (1) {
 			if ( _upper < _lower )
 				break;
@@ -131,7 +128,7 @@ _resume:
 			else if ( (*p) > *_mid )
 				_lower = _mid + 1;
 			else {
-				_trans += (_mid - _keys);
+				_trans += (unsigned int)(_mid - _keys);
 				goto _match;
 			}
 		}
@@ -141,9 +138,9 @@ _resume:
 
 	_klen = _dnstext_range_lengths[cs];
 	if ( _klen > 0 ) {
-		const char *_lower = _keys;
-		const char *_mid;
-		const char *_upper = _keys + (_klen<<1) - 2;
+		const unsigned char *_lower = _keys;
+		const unsigned char *_mid;
+		const unsigned char *_upper = _keys + (_klen<<1) - 2;
 		while (1) {
 			if ( _upper < _lower )
 				break;
@@ -154,7 +151,7 @@ _resume:
 			else if ( (*p) > _mid[1] )
 				_lower = _mid + 2;
 			else {
-				_trans += ((_mid - _keys)>>1);
+				_trans += (unsigned int)((_mid - _keys)>>1);
 				goto _match;
 			}
 		}
@@ -174,27 +171,27 @@ _match:
 		switch ( *_acts++ )
 		{
 	case 0:
-#line 37 "dnslabeltext.rl"
+#line 38 "dnslabeltext.rl"
 	{ 
                         ret.push_back(segment);
                         segment.clear();
                 }
 	break;
 	case 1:
-#line 41 "dnslabeltext.rl"
+#line 42 "dnslabeltext.rl"
 	{ 
                         segment.clear();
                 }
 	break;
 	case 2:
-#line 45 "dnslabeltext.rl"
+#line 46 "dnslabeltext.rl"
 	{
                   char c = *p;
                   appendSplit(ret, segment, c);
                 }
 	break;
 	case 3:
-#line 49 "dnslabeltext.rl"
+#line 50 "dnslabeltext.rl"
 	{
                   char c = *p;
                   val *= 10;
@@ -203,19 +200,19 @@ _match:
                 }
 	break;
 	case 4:
-#line 55 "dnslabeltext.rl"
+#line 56 "dnslabeltext.rl"
 	{
                   appendSplit(ret, segment, val);
                   val=0;
                 }
 	break;
 	case 5:
-#line 60 "dnslabeltext.rl"
+#line 61 "dnslabeltext.rl"
 	{
                   appendSplit(ret, segment, *(p));
                 }
 	break;
-#line 219 "dnslabeltext.cc"
+#line 216 "dnslabeltext.cc"
 		}
 	}
 
@@ -232,13 +229,13 @@ _again:
 	while ( __nacts-- > 0 ) {
 		switch ( *__acts++ ) {
 	case 0:
-#line 37 "dnslabeltext.rl"
+#line 38 "dnslabeltext.rl"
 	{ 
                         ret.push_back(segment);
                         segment.clear();
                 }
 	break;
-#line 242 "dnslabeltext.cc"
+#line 239 "dnslabeltext.cc"
 		}
 	}
 	}
@@ -246,7 +243,7 @@ _again:
 	_out: {}
 	}
 
-#line 73 "dnslabeltext.rl"
+#line 74 "dnslabeltext.rl"
 
 
         if ( cs < dnstext_first_final ) {
@@ -255,212 +252,7 @@ _again:
 
         return ret;
 };
-string segmentDNSLabel(const string& input )
-{
 
-#line 262 "dnslabeltext.cc"
-static const char _dnslabel_actions[] = {
-	0, 1, 0, 1, 1, 1, 2, 1, 
-	3, 1, 4, 2, 3, 0, 2, 3, 
-	4
-};
-
-static const char _dnslabel_key_offsets[] = {
-	0, 0, 4, 8, 10, 12, 16
-};
-
-static const char _dnslabel_trans_keys[] = {
-	46, 92, 32, 126, 46, 92, 48, 57, 
-	48, 57, 48, 57, 46, 92, 32, 126, 
-	46, 92, 32, 126, 0
-};
-
-static const char _dnslabel_single_lengths[] = {
-	0, 2, 2, 0, 0, 2, 2
-};
-
-static const char _dnslabel_range_lengths[] = {
-	0, 1, 1, 1, 1, 1, 1
-};
-
-static const char _dnslabel_index_offsets[] = {
-	0, 0, 4, 8, 10, 12, 16
-};
-
-static const char _dnslabel_trans_targs[] = {
-	6, 2, 1, 0, 1, 1, 3, 0, 
-	4, 0, 5, 0, 6, 2, 1, 0, 
-	6, 2, 1, 0, 0
-};
-
-static const char _dnslabel_trans_actions[] = {
-	1, 0, 9, 0, 3, 3, 5, 0, 
-	5, 0, 5, 0, 11, 7, 14, 0, 
-	1, 0, 9, 0, 0
-};
-
-static const int dnslabel_start = 1;
-static const int dnslabel_first_final = 6;
-static const int dnslabel_error = 0;
-
-static const int dnslabel_en_main = 1;
-
-
-#line 86 "dnslabeltext.rl"
-
-	(void)dnslabel_error;  // silence warnings
-	(void)dnslabel_en_main;
-        const char *p = input.c_str(), *pe = input.c_str() + input.length();
-        //const char* eof = pe;
-        int cs;
-        char val = 0;
-
-        string ret;
-        string segment;
-
-        
-#line 323 "dnslabeltext.cc"
-	{
-	cs = dnslabel_start;
-	}
-
-#line 328 "dnslabeltext.cc"
-	{
-	int _klen;
-	unsigned int _trans;
-	const char *_acts;
-	unsigned int _nacts;
-	const char *_keys;
-
-	if ( p == pe )
-		goto _test_eof;
-	if ( cs == 0 )
-		goto _out;
-_resume:
-	_keys = _dnslabel_trans_keys + _dnslabel_key_offsets[cs];
-	_trans = _dnslabel_index_offsets[cs];
-
-	_klen = _dnslabel_single_lengths[cs];
-	if ( _klen > 0 ) {
-		const char *_lower = _keys;
-		const char *_mid;
-		const char *_upper = _keys + _klen - 1;
-		while (1) {
-			if ( _upper < _lower )
-				break;
-
-			_mid = _lower + ((_upper-_lower) >> 1);
-			if ( (*p) < *_mid )
-				_upper = _mid - 1;
-			else if ( (*p) > *_mid )
-				_lower = _mid + 1;
-			else {
-				_trans += (_mid - _keys);
-				goto _match;
-			}
-		}
-		_keys += _klen;
-		_trans += _klen;
-	}
-
-	_klen = _dnslabel_range_lengths[cs];
-	if ( _klen > 0 ) {
-		const char *_lower = _keys;
-		const char *_mid;
-		const char *_upper = _keys + (_klen<<1) - 2;
-		while (1) {
-			if ( _upper < _lower )
-				break;
-
-			_mid = _lower + (((_upper-_lower) >> 1) & ~1);
-			if ( (*p) < _mid[0] )
-				_upper = _mid - 2;
-			else if ( (*p) > _mid[1] )
-				_lower = _mid + 2;
-			else {
-				_trans += ((_mid - _keys)>>1);
-				goto _match;
-			}
-		}
-		_trans += _klen;
-	}
-
-_match:
-	cs = _dnslabel_trans_targs[_trans];
-
-	if ( _dnslabel_trans_actions[_trans] == 0 )
-		goto _again;
-
-	_acts = _dnslabel_actions + _dnslabel_trans_actions[_trans];
-	_nacts = (unsigned int) *_acts++;
-	while ( _nacts-- > 0 )
-	{
-		switch ( *_acts++ )
-		{
-	case 0:
-#line 98 "dnslabeltext.rl"
-	{ 
-                        printf("Segment end, segment = '%s'\n", segment.c_str());
-                        ret.append(1, (unsigned char)segment.size());
-                        ret.append(segment);
-                        segment.clear();
-                }
-	break;
-	case 1:
-#line 105 "dnslabeltext.rl"
-	{
-                  printf("'\\%c' ", *p);
-                  segment.append(1, *p);
-                }
-	break;
-	case 2:
-#line 109 "dnslabeltext.rl"
-	{
-                  char c = *p;
-                  val *= 10;
-                  val += c-'0';
-                  
-                }
-	break;
-	case 3:
-#line 115 "dnslabeltext.rl"
-	{
-                  printf("_%c_ ", val);
-                  segment.append(1, val);
-                  val=0;
-                }
-	break;
-	case 4:
-#line 121 "dnslabeltext.rl"
-	{
-                  printf("'%c' ", *p);
-                  segment.append(1, *p);
-                }
-	break;
-#line 441 "dnslabeltext.cc"
-		}
-	}
-
-_again:
-	if ( cs == 0 )
-		goto _out;
-	if ( ++p != pe )
-		goto _resume;
-	_test_eof: {}
-	_out: {}
-	}
-
-#line 136 "dnslabeltext.rl"
-
-
-        if ( cs < dnslabel_first_final ) {
-                throw runtime_error("Unable to parse DNS Label '"+input+"'");
-        }
-	
-        if(ret.empty() || ret[0] != 0)
-          ret.append(1, 0);
-        return ret;
-};
 #if 0
 int main()
 {

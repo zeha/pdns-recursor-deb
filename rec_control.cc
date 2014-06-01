@@ -6,6 +6,10 @@
     it under the terms of the GNU General Public License version 2 as 
     published by the Free Software Foundation
 
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -17,7 +21,7 @@
 */
 #include "rec_channel.hh"
 #include <iostream>
-#include "ahuexception.hh"
+#include "pdnsexception.hh"
 #include "arguments.hh"
 #include "config.h"
 
@@ -41,15 +45,26 @@ static void initArguments(int argc, char** argv)
   arg().set("socket-dir","Where the controlsocket will live")=LOCALSTATEDIR;
   arg().set("process","When controlling multiple recursors, the target process number")="";
   arg().set("timeout", "Number of seconds to wait for the recursor to respond")="5";
+  arg().set("config-name","Name of this virtual configuration - will rename the binary image")="";
   arg().setCmd("help","Provide this helpful message");
 
   arg().laxParse(argc,argv);  
-  if(arg().getCommands().empty() || arg().mustDo("help")) {
+  if(arg().mustDo("help")) {
+    cout<<"syntax: rec_control [options] command, options as below: "<<endl<<endl;
+    cout<<arg().helpstring(arg()["help"])<<endl;
+    exit(0);
+  }
+
+  if(arg().getCommands().empty()) {
     cerr<<"syntax: rec_control [options] command, options as below: "<<endl<<endl;
     cerr<<arg().helpstring(arg()["help"])<<endl;
     exit(99);
   }
+
   string configname=::arg()["config-dir"]+"/recursor.conf";
+  if (::arg()["config-name"] != "")
+    configname=::arg()["config-dir"]+"/recursor-"+::arg()["config-name"]+".conf";
+  
   cleanSlashes(configname);
 
   if(!::arg().preParseFile(configname.c_str(), "socket-dir", LOCALSTATEDIR)) 
@@ -63,6 +78,10 @@ try
   initArguments(argc, argv);
   RecursorControlChannel rccS;
   string sockname="pdns_recursor";
+
+  if (arg()["config-name"] != "")
+    sockname+="-"+arg()["config-name"];
+
   if(!arg()["process"].empty())
     sockname+="."+arg()["process"];
 
@@ -82,7 +101,7 @@ try
   cout<<receive;
   return 0;
 }
-catch(AhuException& ae)
+catch(PDNSException& ae)
 {
   cerr<<"Fatal: "<<ae.reason<<"\n";
   return 1;

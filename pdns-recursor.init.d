@@ -5,14 +5,13 @@
 # Required-Stop:     $network $remote_fs $syslog
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
-# Short-Description: Start the recursor at boot time.
+# Short-Description: PowerDNS Recursor
 ### END INIT INFO
 # chkconfig: - 80 75
 # description: pdns_recursor is a versatile high performance recursing nameserver
 
-prefix=/usr/
-BINARYPATH=/usr/bin/
-SBINARYPATH=/usr/sbin/
+BINARYPATH=/usr/bin
+SBINARYPATH=/usr/sbin
 SOCKETPATH=/var/run
 
 pdns_server=$SBINARYPATH/pdns_recursor
@@ -33,8 +32,13 @@ case "$1" in
 		if test "$NOTRUNNING" = "0" 
 		then 
 			echo "running"
+			exit 0
 		else
 			echo "not running"
+			# Note: 3 is a white lie. We currently don't *really*
+			# know that it's not running, or if the ping failed for
+			# other reasons (= 4).
+			exit 3
 		fi 
 	;;	
 
@@ -46,13 +50,14 @@ case "$1" in
 			echo $ret
 		else
 			echo "not running"
+			exit 1
 		fi 
 	;;		
 
 
 	force-stop)
 		echo -n "Stopping PowerDNS recursing nameserver: "
-		killall -v -9 pdns_server
+		killall -v -g -9 pdns_server
 		echo "killed"
 	;;
 
@@ -61,6 +66,7 @@ case "$1" in
 		if test "$NOTRUNNING" = "0" 
 		then 
 			echo "already running"
+			exit 1
 		else
 			$pdns_server --daemon 
 			if test "$?" = "0"

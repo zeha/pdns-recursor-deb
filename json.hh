@@ -5,7 +5,11 @@
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
     as published by the Free Software Foundation
-    
+
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -19,8 +23,22 @@
 
 #include <string>
 #include <map>
+#include <stdexcept>
 #include "rapidjson/document.h"
 
-std::string returnJSONObject(const std::map<std::string, std::string>& items);
-std::string makeLogGrepJSON(std::map<std::string, std::string>& varmap, const std::string& fname, const std::string& prefix="");
+std::string returnJsonObject(const std::map<std::string, std::string>& items);
+std::string returnJsonError(const std::string& error);
 std::string makeStringFromDocument(const rapidjson::Document& doc);
+int intFromJson(const rapidjson::Value& container, const char* key);
+int intFromJson(const rapidjson::Value& container, const char* key, const int default_value);
+std::string stringFromJson(const rapidjson::Value& container, const char* key);
+std::string stringFromJson(const rapidjson::Value& container, const char* key, const std::string& default_value);
+bool boolFromJson(const rapidjson::Value& container, const char* key);
+bool boolFromJson(const rapidjson::Value& container, const char* key, const bool default_value);
+
+class JsonException : public std::runtime_error
+{
+public:
+  JsonException(const std::string& what) : std::runtime_error(what) {
+  }
+};
