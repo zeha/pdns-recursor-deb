@@ -1,5 +1,4 @@
-do-not-strip-binaries
-kfreebsd-ftbfs-patch
 pdns-recursor-less-chatty
-hurd-ftbfs-patch
-remove-pdns_hw-patch
+1443.patch
+1444.patch
+1445.patch
