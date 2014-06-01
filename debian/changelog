@@ -1,3 +1,14 @@
+pdns-recursor (3.6.0~rc1-1) unstable; urgency=medium
+
+  * Imported Upstream version 3.6.0~rc1
+  * Replace local patches with upstream PRs
+    do-not-strip-binaries, hurd-ftbfs-patch, kfreebsd-ftbfs-patch and
+    remove-pdns_hw-patch are now pending upstream approval and merge.
+  * Add myself to Uploaders
+  * Bump Standards-Version to 3.9.5
+
+ -- Christian Hofstaedtler <zeha@debian.org>  Sun, 01 Jun 2014 17:39:35 +0200
+
 pdns-recursor (3.5.3-1) unstable; urgency=low
 
   * New upstream version
