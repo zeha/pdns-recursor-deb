@@ -1,11 +1,14 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2002 - 2011  PowerDNS.COM BV
+    Copyright (C) 2002 - 2014  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
     as published by the Free Software Foundation
-    
+
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
 
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -20,17 +23,13 @@
 #define PDNS_IPUTILSHH
 
 #include <string>
-
-#ifndef WIN32
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#endif // WIN32
-
 #include <iostream>
 #include <stdio.h>
 #include <functional>
-#include "ahuexception.hh"
+#include "pdnsexception.hh"
 #include "misc.hh"
 #include <sys/socket.h>
 #include <netdb.h>
@@ -120,7 +119,7 @@ union ComboAddress {
     if(makeIPv4sockaddr(str, &sin4)) {
       sin6.sin6_family = AF_INET6;
       if(makeIPv6sockaddr(str, &sin6) < 0)
-        throw AhuException("Unable to convert presentation address '"+ str +"'"); 
+        throw PDNSException("Unable to convert presentation address '"+ str +"'"); 
       
     }
     if(!sin4.sin_port) // 'str' overrides port!
@@ -148,7 +147,7 @@ union ComboAddress {
   ComboAddress mapToIPv4() const
   {
     if(!isMappedIPv4())
-      throw AhuException("ComboAddress can't map non-mapped IPv6 address back to IPv4");
+      throw PDNSException("ComboAddress can't map non-mapped IPv6 address back to IPv4");
     ComboAddress ret;
     ret.sin4.sin_family=AF_INET;
     ret.sin4.sin_port=sin4.sin_port;
@@ -177,10 +176,10 @@ union ComboAddress {
 };
 
 /** This exception is thrown by the Netmask class and by extension by the NetmaskGroup class */
-class NetmaskException: public AhuException 
+class NetmaskException: public PDNSException 
 {
 public:
-  NetmaskException(const string &a) : AhuException(a) {}
+  NetmaskException(const string &a) : PDNSException(a) {}
 };
 
 inline ComboAddress makeComboAddress(const string& str)
@@ -318,6 +317,7 @@ class NetmaskGroup
 {
 public:
   //! If this IP address is matched by any of the classes within
+
   bool match(const ComboAddress *ip)
   {
     for(container_t::const_iterator i=d_masks.begin();i!=d_masks.end();++i)
@@ -326,12 +326,23 @@ public:
 
     return false;
   }
+
+  bool match(const ComboAddress& ip)
+  {
+    return match(&ip);
+  }
+
   //! Add this Netmask to the list of possible matches
   void addMask(const string &ip)
   {
     d_masks.push_back(Netmask(ip));
   }
-  
+
+  void clear()
+  {
+    d_masks.clear();
+  }
+
   bool empty()
   {
     return d_masks.empty();
@@ -353,11 +364,33 @@ public:
     return str.str();
   }
 
+  void toStringVector(vector<string>* vec) const
+  {
+    for(container_t::const_iterator iter = d_masks.begin(); iter != d_masks.end(); ++iter) {
+      vec->push_back(iter->toString());
+    }
+  }
+
+  void toMasks(const string &ips)
+  {
+    vector<string> parts;
+    stringtok(parts, ips, ", \t");
+
+    for (vector<string>::const_iterator iter = parts.begin(); iter != parts.end(); ++iter)
+      addMask(*iter);
+  }
 
 private:
   typedef vector<Netmask> container_t;
   container_t d_masks;
-  
 };
+
+
+int SSocket(int family, int type, int flags);
+int SConnect(int sockfd, const ComboAddress& remote);
+int SBind(int sockfd, const ComboAddress& local);
+int SAccept(int sockfd, ComboAddress& remote);
+int SListen(int sockfd, int limit);
+int SSetsockopt(int sockfd, int level, int opname, int value);
 
 #endif

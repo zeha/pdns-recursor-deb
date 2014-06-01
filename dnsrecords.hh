@@ -6,6 +6,10 @@
     it under the terms of the GNU General Public License version 2 as 
     published by the Free Software Foundation
 
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -64,6 +68,15 @@ private:
   uint32_t d_ip;
 };
 
+class AAAARecordContent : public DNSRecordContent
+{
+public:
+  AAAARecordContent(std::string &val);
+  includeboilerplate(AAAA);
+private:
+  std::string d_ip6;
+};
+
 class MXRecordContent : public DNSRecordContent
 {
 public:
@@ -98,6 +111,8 @@ public:
 private:
   uint8_t d_preference, d_gatewaytype, d_algorithm;
   string d_gateway, d_publickey;
+  uint32_t d_ip4;
+  string d_ip6;
 };
 
 class DHCIDRecordContent : public DNSRecordContent
@@ -186,6 +201,16 @@ private:
   string d_content;
 };
 
+class DNAMERecordContent : public DNSRecordContent
+{
+public:
+  includeboilerplate(DNAME)
+
+private:
+  string d_content;
+};
+
+
 class MRRecordContent : public DNSRecordContent
 {
 public:
@@ -195,6 +220,15 @@ private:
   string d_alias;
 };
 
+class MINFORecordContent : public DNSRecordContent
+{
+public:
+  includeboilerplate(MINFO)
+
+private:
+  string d_rmailbx;
+  string d_emailbx;
+};
 
 class OPTRecordContent : public DNSRecordContent
 {
@@ -341,6 +375,15 @@ public:
   };
 //}
 
+class RKEYRecordContent : public DNSRecordContent
+{
+public:
+  RKEYRecordContent();
+  includeboilerplate(RKEY)
+  uint16_t d_flags;
+  uint8_t d_protocol, d_algorithm;
+  string d_key;
+};
 
 class SOARecordContent : public DNSRecordContent
 {
@@ -471,6 +514,33 @@ private:
   string d_mboxfw;
 };
 
+class EUI48RecordContent : public DNSRecordContent 
+{
+public:
+  EUI48RecordContent() : DNSRecordContent(ns_t_eui48) {};
+  static void report(void);
+  static DNSRecordContent* make(const DNSRecord &dr, PacketReader& pr);
+  static DNSRecordContent* make(const string& zone);
+  void toPacket(DNSPacketWriter& pw);
+  string getZoneRepresentation() const;
+private:
+ // storage for the bytes
+ uint8_t d_eui48[6]; 
+};
+
+class EUI64RecordContent : public DNSRecordContent
+{
+public:
+  EUI64RecordContent() : DNSRecordContent(ns_t_eui64) {};
+  static void report(void);
+  static DNSRecordContent* make(const DNSRecord &dr, PacketReader& pr);
+  static DNSRecordContent* make(const string& zone);
+  void toPacket(DNSPacketWriter& pw);
+  string getZoneRepresentation() const;
+private:
+ // storage for the bytes
+ uint8_t d_eui64[8];
+};
 
 #define boilerplate(RNAME, RTYPE)                                                                         \
 RNAME##RecordContent::DNSRecordContent* RNAME##RecordContent::make(const DNSRecord& dr, PacketReader& pr) \
@@ -497,10 +567,12 @@ void RNAME##RecordContent::toPacket(DNSPacketWriter& pw)                        
 void RNAME##RecordContent::report(void)                                                            \
 {                                                                                                  \
   regist(1, RTYPE, &RNAME##RecordContent::make, &RNAME##RecordContent::make, #RNAME);              \
+  regist(254, RTYPE, &RNAME##RecordContent::make, &RNAME##RecordContent::make, #RNAME);            \
 }                                                                                                  \
 void RNAME##RecordContent::unreport(void)                                                          \
 {                                                                                                  \
   unregist(1, RTYPE);                                                                              \
+  unregist(254, RTYPE);                                                                            \
 }                                                                                                  \
                                                                                                    \
 RNAME##RecordContent::RNAME##RecordContent(const string& zoneData) : DNSRecordContent(RTYPE)       \
@@ -529,6 +601,7 @@ template<class Convertor>                                         \
 void RNAME##RecordContent::xfrPacket(Convertor& conv)             \
 {                                                                 \
   CONV;                                                           \
+  if (conv.eof() == false) throw MOADNSException("All data was not consumed"); \
 }                                                                 \
 
 struct EDNSOpts

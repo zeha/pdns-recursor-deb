@@ -6,6 +6,10 @@
     it under the terms of the GNU General Public License version 2 
     as published by the Free Software Foundation
 
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -31,8 +35,7 @@ public:
   ZoneParserTNG(const string& fname, const string& zname="", const string& reldir="");
 
   ~ZoneParserTNG();
-
-  bool get(DNSResourceRecord& rr);
+  bool get(DNSResourceRecord& rr, std::string* comment=0);
   typedef runtime_error exception;
   typedef deque<pair<string::size_type, string::size_type> > parts_t;
 private:

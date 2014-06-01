@@ -1,10 +1,14 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2002 - 2010 PowerDNS.COM BV
+    Copyright (C) 2002 - 2014 PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 as 
     published by the Free Software Foundation
+
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
 
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -30,7 +34,7 @@
 #include <vector>
 #include "dns.hh"
 #include "qtype.hh"
-#include "ahuexception.hh"
+#include "pdnsexception.hh"
 #include "arguments.hh"
 #include "sstuff.hh"
 #include "syncres.hh"
@@ -40,18 +44,6 @@
 #include "dns_random.hh"
 #include <boost/scoped_array.hpp>
 #include <boost/algorithm/string.hpp>
-
-string dns0x20(const std::string& in)
-{
-  string ret(in);
-  string::size_type len=ret.size();
-  for(string::size_type pos = 0 ; pos < len; ++pos) {
-    if(isalpha(in[pos]) && dns_random(2))
-      ret[pos]^=0x20;
-  }
-  //  cerr<<"'"<<in<<"' -> '"<<ret<<"'\n";
-  return ret;
-}
 
 //! returns -2 for OS limits error, -1 for permanent error that has to do with remote **transport**, 0 for timeout, 1 for success
 /** lwr is only filled out in case 1 was returned, and even when returning 1 for 'success', lwr might contain DNS errors
@@ -98,18 +90,18 @@ int asyncresolve(const ComboAddress& ip, const string& domain, int type, bool do
       g_stats.ipv6queries++;
 
     if((ret=asendto((const char*)&*vpacket.begin(), (int)vpacket.size(), 0, ip, pw.getHeader()->id, 
-        	    domain, type, &queryfd)) < 0) {
+                    domain, type, &queryfd)) < 0) {
       return ret; // passes back the -2 EMFILE
     }
   
     // sleep until we see an answer to this, interface to mtasker
     
     ret=arecvfrom(reinterpret_cast<char *>(buf.get()), bufsize-1,0, ip, &len, pw.getHeader()->id, 
-        	  domain, type, queryfd, now);
+                  domain, type, queryfd, now);
   }
   else {
     try {
-      Socket s((AddressFamily)ip.sin4.sin_family, Stream);
+      Socket s(ip.sin4.sin_family, SOCK_STREAM);
 
       s.setNonBlocking();
       ComboAddress local = getQueryLocalAddress(ip.sin4.sin_family, 0);
@@ -130,14 +122,14 @@ int asyncresolve(const ComboAddress& ip, const string& domain, int type, bool do
         return ret;
       
       packet.clear();
-      ret=arecvtcp(packet, 2, &s);
+      ret=arecvtcp(packet, 2, &s, false);
       if(!(ret > 0))
         return ret;
       
       memcpy(&tlen, packet.c_str(), 2);
       len=ntohs(tlen); // switch to the 'len' shared with the rest of the function
       
-      ret=arecvtcp(packet, len, &s);
+      ret=arecvtcp(packet, len, &s, false);
       if(!(ret > 0))
         return ret;
       

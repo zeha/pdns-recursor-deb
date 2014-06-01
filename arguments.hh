@@ -5,7 +5,10 @@
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
     as published by the Free Software Foundation
-    
+
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
 
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -20,21 +23,20 @@
 #define ARGUMENTS_HH
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 #include <fstream>
 #include <iostream>
 #include "misc.hh"
-#include "ahuexception.hh"
-#ifndef WIN32
-# include <sys/types.h>
-# include <pwd.h>
-# include <grp.h>
-#endif
+#include "pdnsexception.hh"
+#include <sys/types.h>
+#include <pwd.h>
+#include <grp.h>
 
 #include "namespaces.hh"
 
-typedef AhuException ArgException;
+typedef PDNSException ArgException;
 
 /** This class helps parsing argc and argv into a map of parameters. We have 3 kinds of formats:
 
@@ -85,6 +87,7 @@ public:
   bool preParseFile(const char *fname, const string &arg, const string& theDefault=""); //!< use this to preparse a single var in configuration
 
   bool file(const char *fname, bool lax=false); //!< Parses a file with parameters
+  bool file(const char *fname, bool lax, bool included); 
   bool laxFile(const char *fname) 
   {
     return file(fname,true);
@@ -93,20 +96,18 @@ public:
   bool parmIsset(const string &var); //!< Checks if a parameter is set to *a* value
   bool mustDo(const string &var); //!< if a switch is given, if we must do something (--help)
   int asNum(const string &var); //!< return a variable value as a number
-#ifndef WIN32
-  mode_t asMode(const string &var); //<!< return value interpreted as octal number
+  mode_t asMode(const string &var); //!< return value interpreted as octal number
   uid_t asUid(const string &var); //!< return user id, resolves if necessary
   gid_t asGid(const string &var); //!< return group id, resolves if necessary
-#endif
   double asDouble(const string &var); //!< return a variable value as a number
   string &set(const string &); //!< Gives a writable reference and allocates space for it
-  string &set(const string &, const string &); //!< Does the same but also allows to specify a help message
+  string &set(const string &, const string &); //!< Does the same but also allows one to specify a help message
   void setCmd(const string &, const string &); //!< Add a command flag
   string &setSwitch(const string &, const string &); //!< Add a command flag
   string helpstring(string prefix=""); //!< generates the --help
-  string configstring(); //!< generates the --mkconfig
+  string configstring(bool current=false); //!< generates the --mkconfig
   bool contains(const string &var, const string &val);
-  bool isEmpty(const string &var); //<! checks if variable has value
+  bool isEmpty(const string &var); //!< checks if variable has value
 
   vector<string>list();
   string getHelp(const string &item);
@@ -115,6 +116,7 @@ public:
   const param_t::const_iterator end(); //!< iterator semantics
   const string &operator[](const string &); //!< iterator semantics
   const vector<string>&getCommands();
+  void gatherIncludes(std::vector<std::string> &extraConfigs);
 private:
   void parseOne(const string &unparsed, const string &parseOnly="", bool lax=false);
   typedef map<string,string> params_t;
@@ -122,6 +124,7 @@ private:
   map<string,string> helpmap;
   map<string,string> d_typeMap;
   vector<string> d_cmds;
+  std::set<string> d_cleared;
 };
 
 extern ArgvMap &arg();

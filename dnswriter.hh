@@ -4,11 +4,6 @@
 #include <string>
 #include <vector>
 #include <map>
-#if !defined SOLARIS8 && !defined WIN32
-
-#elif defined WIN32
-#include "utility.hh"
-#endif
 #include "dns.hh"
 #include "namespaces.hh"
 
@@ -26,7 +21,7 @@
     Calling convention:
 
     vector<uint8_t> content;
-    DNSPacketWriter dpw(content, const string& qname, uint16_t qtype, uint16_t qclass=1);  // sets the question
+    DNSPacketWriter dpw(content, const string& qname, uint16_t qtype, uint16_t qclass=QClass:IN);  // sets the question
     dpw.startrecord("this.is.an.ip.address.", ns_t_a);    // does nothing, except store qname and qtype
     dpw.xfr32BitInt(0x01020304);                         // adds 4 bytes (0x01020304) to the record buffer
     dpw.startrecord("this.is.an.ip.address.", ns_t_a);    // aha! writes out dnsrecord header containing qname and qtype and length 4, plus the recordbuffer, which gets emptied
@@ -46,11 +41,11 @@ public:
   enum Place {ANSWER=1, AUTHORITY=2, ADDITIONAL=3}; 
 
   //! Start a DNS Packet in the vector passed, with question qname, qtype and qclass
-  DNSPacketWriter(vector<uint8_t>& content, const string& qname, uint16_t  qtype, uint16_t qclass=1, uint8_t opcode=0);
+  DNSPacketWriter(vector<uint8_t>& content, const string& qname, uint16_t  qtype, uint16_t qclass=QClass::IN, uint8_t opcode=0);
   
   /** Start a new DNS record within this packet for namq, qtype, ttl, class and in the requested place. Note that packets can only be written in natural order - 
       ANSWER, AUTHORITY, ADDITIONAL */
-  void startRecord(const string& name, uint16_t qtype, uint32_t ttl=3600, uint16_t qclass=1, Place place=ANSWER);
+  void startRecord(const string& name, uint16_t qtype, uint32_t ttl=3600, uint16_t qclass=QClass::IN, Place place=ANSWER, bool compress=true);
 
   /** Shorthand way to add an Opt-record, for example for EDNS0 purposes */
   typedef vector<pair<uint16_t,std::string> > optvect_t;
@@ -66,6 +61,9 @@ public:
   /** Should the packet have grown too big for the writer's liking, rollback removes the record currently being written */
   void rollback();
 
+  /** Discard all content except the question section */
+  void truncate();
+
   void xfr48BitInt(uint64_t val);
   void xfr32BitInt(uint32_t val);
   void xfr16BitInt(uint16_t val);
@@ -76,6 +74,10 @@ public:
   void xfrIP(const uint32_t& val)
   {
     xfr32BitInt(htonl(val));
+  }
+  void xfrIP6(const std::string& val) 
+  {
+    xfrBlob(val,16);
   }
   void xfrTime(const uint32_t& val)
   {
@@ -108,6 +110,7 @@ public:
   {
     return d_content;
   }
+  bool eof() { return true; } // we don't know how long the record should be
 
 private:
   vector <uint8_t>& d_content;
@@ -121,6 +124,7 @@ private:
   uint16_t d_stuff;
   uint16_t d_sor;
   uint16_t d_rollbackmarker; // start of last complete packet, for rollback
+  uint16_t d_truncatemarker; // end of header, for truncate
   Place d_recordplace;
   bool d_canonic, d_lowerCase;
 };

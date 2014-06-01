@@ -5,6 +5,39 @@
 #include <iostream>
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
+#include <boost/assign/list_of.hpp>
+
+std::vector<std::string> RCode::rcodes_s = boost::assign::list_of 
+  ("No Error")
+  ("Form Error")
+  ("Server Failure")
+  ("Non-Existent domain")
+  ("Not Implemented")
+  ("Query Refused")
+  ("Name Exists when it should not")
+  ("RR Set Exists when it should not")
+  ("RR Set that should exist does not")
+  ("Server Not Authoritative for zone / Not Authorized")
+  ("Name not contained in zone")
+  ("Err#11")
+  ("Err#12")
+  ("Err#13")
+  ("Err#14")
+  ("Err#15")
+  ("Bad OPT Version / TSIG Signature Failure")
+  ("Key not recognized")
+  ("Signature out of time window")
+  ("Bad TKEY Mode")
+  ("Duplicate key name")
+  ("Algorithm not supported")
+  ("Bad Truncation")
+;
+
+std::string RCode::to_s(unsigned short rcode) {
+  if (rcode > RCode::rcodes_s.size()-1 ) 
+    return std::string("Err#")+boost::lexical_cast<std::string>(rcode);
+  return RCode::rcodes_s[rcode];
+}
 
 static void appendEscapedLabel(string& ret, const char* begin, unsigned char labellen)
 {
@@ -36,11 +69,11 @@ public:
     {}
   
     
-  const char operator[](unsigned int offset) const
+  char operator[](unsigned int offset) const
   {
     if(offset < d_length)
       return d_ptr[offset];
-    else throw runtime_error("out of bounds: "+boost::lexical_cast<string>(offset)+" >= " + boost::lexical_cast<string>(d_length));
+    throw runtime_error("out of bounds: "+boost::lexical_cast<string>(offset)+" >= " + boost::lexical_cast<string>(d_length));
   }
 private:  
   const char* d_ptr;
@@ -68,7 +101,7 @@ bool dnspacketLessThan(const std::string& a, const std::string& b)
     int result=0;
     unsigned int n;
     for(n = 0; n < aLabelLen && n < bLabelLen; ++n) 
-      if((result = aSafe[aPos + n] - bSafe[bPos +n]))
+      if((result = aSafe[aPos + n] - bSafe[bPos +n]))   // XXX this should perhaps be dns_tolower
         break;
     // cerr<<"Done loop, result="<<result<<", n = "<<n<<", aLabelLen="<<aLabelLen<<", bLabelLen="<<bLabelLen<<endl;
     if(result < 0)
@@ -95,6 +128,25 @@ bool dnspacketLessThan(const std::string& a, const std::string& b)
   return boost::tie(aQtype, aQclass) < boost::tie(bQtype, bQclass);
 }
 
+// goal is to hash based purely on the question name, and turn error into 'default'
+uint32_t hashQuestion(const char* packet, uint16_t len, uint32_t init)
+{
+  if(len < 12) 
+    return init;
+  
+  uint32_t ret=init;
+  const unsigned char* end = (const unsigned char*)packet+len;
+  const unsigned char* pos = (const unsigned char*)packet+12;
+
+  unsigned char labellen;
+  while((labellen=*pos++) && pos < end) { 
+    if(pos + labellen + 1 > end) // include length field  in hash
+      return 0;
+    ret=burtle(pos, labellen+1, ret);
+    pos += labellen;
+  }
+  return ret;
+}
 
 string questionExpand(const char* packet, uint16_t len, uint16_t& type)
 {
@@ -187,10 +239,3 @@ string& attodot(string &str)
    return str;
 }
 
-string strrcode(unsigned char rcode)
-{
-  static const char* rcodes[]={"No Error", "FormErr", "SERVFAIL", "NXDOMAIN", "NotImp", "Refused", "", "", "", "Not Auth"};
-  if((rcode < sizeof(rcodes) / sizeof(*rcodes)) && *rcodes[rcode])
-    return rcodes[rcode];
-  return "Err#"+lexical_cast<string>((int)rcode);
-}

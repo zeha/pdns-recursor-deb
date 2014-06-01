@@ -5,7 +5,10 @@
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
     as published by the Free Software Foundation
-    
+
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
 
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -18,15 +21,11 @@
 */
 #ifndef MTASKER_HH
 #define MTASKER_HH
-
-#ifdef WIN32
-# include "win32_mtasker.hh"
-#else
-
+#include <stdint.h>
 #include <signal.h>
 #include <ucontext.h>
 #include <queue>
-#include <vector> 
+#include <vector>
 #include <map>
 #include <time.h>
 #include <boost/multi_index_container.hpp>
@@ -39,8 +38,8 @@ struct KeyTag {};
 
 //! The main MTasker class    
 /** The main MTasker class. See the main page for more information.
-    \param EventKey Type of the key with which events are to be identified. Defaults to int.
-    \param EventVal Type of the content or value of an event. Defaults to int. Cannot be set to void.
+    \tparam EventKey Type of the key with which events are to be identified. Defaults to int.
+    \tparam EventVal Type of the content or value of an event. Defaults to int. Cannot be set to void.
     \note The EventKey needs to have an operator< defined because it is used as the key of an associative array
 */
 template<class EventKey=int, class EventVal=int> class MTasker
@@ -113,6 +112,5 @@ private:
 };
 #include "mtasker.cc"
 
-#endif // WIN32
 #endif // MTASKER_HH
 

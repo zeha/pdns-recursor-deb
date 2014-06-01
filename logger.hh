@@ -6,6 +6,10 @@
     it under the terms of the GNU General Public License version 2 as 
     published by the Free Software Foundation
 
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -25,16 +29,8 @@
 #include <iostream>
 #include <sstream>
 #include "config.h"
-#ifndef WIN32
-# include <syslog.h>
+#include <syslog.h>
 #include <pthread.h>
-
-#else
-# define WINDOWS_LEAN_AND_MEAN
-# include <windows.h>
-typedef int pthread_mutex_t;
-typedef int pthread_t;
-#endif // WIN32
 
 #include "namespaces.hh"
 
@@ -42,52 +38,17 @@ typedef int pthread_t;
 class Logger
 {
 public:
-#ifndef WIN32
   Logger(const string &, int facility=LOG_DAEMON); //!< pass the identification you wish to appear in the log
 
   //! The urgency of a log message
   enum Urgency {All=99999,NTLog=12345,Alert=LOG_ALERT, Critical=LOG_CRIT, Error=LOG_ERR, Warning=LOG_WARNING,
         	Notice=LOG_NOTICE,Info=LOG_INFO, Debug=LOG_DEBUG, None=-1};
 
-#else
-  Logger( const string &, int facility = 0 ); //!< pass the identification you wish to appear in the log
-
-  //! The urgency of a log message
-  enum Urgency 
-  {
-    All     = 99999,
-    NTLog   = 12345,
-    Alert   = EVENTLOG_ERROR_TYPE, 
-    Critical= EVENTLOG_ERROR_TYPE, 
-    Error   = EVENTLOG_ERROR_TYPE, 
-    Warning = EVENTLOG_WARNING_TYPE,
-        	Notice  = EVENTLOG_INFORMATION_TYPE,
-    Info    = EVENTLOG_INFORMATION_TYPE, 
-    Debug   = EVENTLOG_INFORMATION_TYPE, 
-    None    = -1
-  };
-
-  void toNTLog( void );
-
-private:
-  //! Handle used to communicate with the event log.
-  HANDLE m_eventLogHandle;
-
-  //! Log file handle.
-  FILE *m_pLogFile;
-
-  //! Log current message to the NT log?
-  map< pthread_t, bool > m_toNTLog;
-
-public:
-
-#endif // WIN32
-
-  /** Log a message. 
-      \param msg Message you wish to log 
-      \param Urgency Urgency of the message you wish to log
+  /** Log a message.
+      \param msg Message you wish to log
+      \param u Urgency of the message you wish to log
   */
-  void log(const string &msg, Urgency u=Notice); 
+  void log(const string &msg, Urgency u=Notice);
 
   void setFacility(int f){d_facility=f;open();} //!< Choose logging facility
   void setFlag(int f){flags|=f;open();} //!< set a syslog flag
@@ -117,12 +78,7 @@ public:
   Logger& operator<<(unsigned long long);   //!< log an unsigned 64 bit int
   Logger& operator<<(Urgency);    //!< set the urgency, << style
 
-#ifndef WIN32
   Logger& operator<<(std::ostream & (&)(std::ostream &)); //!< this is to recognise the endl, and to commit the log
-#else
-  // This is a hack to keep MSVC from generating a internal compiler error.
-  Logger& operator<<(ostream & (hack)(ostream &)); //!< this is to recognise the endl, and to commit the log
-#endif // WIN32
 
 private:
   map<pthread_t,string>d_strings;
@@ -142,7 +98,7 @@ extern Logger &theL(const string &pname="");
 #ifdef VERBOSELOG
 #define DLOG(x) x
 #else
-#define DLOG(x) 
+#define DLOG(x) ((void)0)
 #endif
 
 

@@ -42,7 +42,7 @@ DNSResourceRecord String2DNSRR(const string& qname, const QType& qt, const strin
         uint16_t offset=256*(labellen & ~0xc0) + (unsigned int)serial.at(frompos++) - sizeof(dnsheader)-5;
 
         simpleExpandTo(encoded, offset, rr.content);
-        //	cerr<<"Oops, fallback, content so far: '"<<rr.content<<"', offset: "<<offset<<", '"<<qname<<"', "<<qt.getName()<<"\n";
+        //        cerr<<"Oops, fallback, content so far: '"<<rr.content<<"', offset: "<<offset<<", '"<<qname<<"', "<<qt.getName()<<"\n";
         break;
       }
       rr.content.append(serial.c_str()+frompos, labellen);
@@ -91,6 +91,7 @@ unsigned int MemRecursorCache::size()
   return (unsigned int)d_cache.size();
 }
 
+// this function is too slow to poll!
 unsigned int MemRecursorCache::bytes()
 {
   unsigned int ret=0;
@@ -115,9 +116,7 @@ int MemRecursorCache::get(time_t now, const string &qname, const QType& qt, set<
     d_cachecache=d_cache.equal_range(tie(qname));
     d_cachecachevalid=true;
   }
-  else
-    //    cerr<<"had cache cache hit!"<<endl;
-    ;
+//  else cerr<<"had cache cache hit!"<<endl;
 
   if(res)
     res->clear();
@@ -239,8 +238,13 @@ void MemRecursorCache::replace(time_t now, const string &qname, const QType& qt,
     ce.d_auth = true;
     isNew=true;           // data should be sorted again
   }
-  else
-    ; //cerr<<"\tNot nuking"<<endl;
+//  else cerr<<"\tNot nuking"<<endl;
+
+  // make sure we don't accidentally merge old and new unauth data
+  if(!auth && !ce.d_auth) {
+    ce.d_records.clear();
+    isNew=true;
+  }
 
   // cerr<<"\tHave "<<content.size()<<" records to store\n";
   for(set<DNSResourceRecord>::const_iterator i=content.begin(); i != content.end(); ++i) {

@@ -6,6 +6,9 @@
     it under the terms of the GNU General Public License version 2
     as published by the Free Software Foundation
     
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
 
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -21,15 +24,6 @@
 #ifndef UTILITY_HH
 #define UTILITY_HH
 
-#ifndef WIN32
-// # include "config.h"
-#endif // WIN32
-
-#ifdef _MSC_VER
-# define NEED_POSIX_TYPEDEF
-# pragma warning (disable:4996)
-#endif // _MSC_VER
-
 #ifdef NEED_POSIX_TYPEDEF
 typedef unsigned char uint8_t;
 typedef unsigned short int uint16_t;
@@ -37,38 +31,17 @@ typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
 #endif
 
-
-#ifndef WIN32
-# include <arpa/inet.h>
-# include <netinet/in.h>
-# include <sys/socket.h>
-# include <sys/time.h>
-# include <sys/uio.h>
-# include <signal.h>
-# include <pthread.h>
-# include <semaphore.h>
-# include <signal.h>
-# include <errno.h>
-# include <unistd.h>
-#else
-typedef int socklen_t;
-#define _WIN32_WINNT 0x0400
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <io.h>
-# define WINDOWS_LEAN_AND_MEAN
-# include <windows.h>
-# include <signal.h>
-# include <map>
-
-#ifndef ETIMEDOUT
-# define ETIMEDOUT    WSAETIMEDOUT
-#endif // ETIMEDOUT
-
-# define EINPROGRESS  WSAEWOULDBLOCK
-
-# define snprintf _snprintf
-#endif // WIN32
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/uio.h>
+#include <signal.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <signal.h>
+#include <errno.h>
+#include <unistd.h>
 #include <string>
 
 #include "namespaces.hh"
@@ -78,25 +51,15 @@ class Semaphore
 {
 private:
   sem_t *m_pSemaphore;
-#ifdef WIN32
   typedef int sem_value_t;
 
-  //! The semaphore.
-
-
-
-  //! Semaphore counter.
-  long m_counter;
-
-#else
-  typedef int sem_value_t;
-
+#if DARWIN || _AIX || __APPLE__
   uint32_t       m_magic;
   pthread_mutex_t m_lock;
   pthread_cond_t  m_gtzero;
   sem_value_t     m_count;
   uint32_t       m_nwaiters;
-#endif
+#endif // DARWIN || _AIX || __APPLE__
 
 protected:
 public:
@@ -119,44 +82,28 @@ public:
   int getValue( Semaphore::sem_value_t *sval );
 };
 
-//! This is a utility class used for platform independant abstraction.
+//! This is a utility class used for platform independent abstraction.
 class Utility
 {
-#ifdef WIN32
-private:
-  static int inet_pton4( const char *src, void *dst );
-  static int inet_pton6( const char *src, void *dst );
-
-  static const char *inet_ntop4( const char *src, char *dst, size_t size );
-  static const char *inet_ntop6( const char *src, char *dst, size_t size );
-
-#endif // WIN32
-
 public:
-#ifdef WIN32
-
-  //! iovec structure for windows.
-  typedef struct 
-  {
-    void  *iov_base;  //!< Base address.
-    size_t iov_len;   //!< Number of bytes.
-  } iovec;
-
-  // A few type defines.
-  typedef DWORD     pid_t;
-  typedef SOCKET    sock_t;
-  typedef int       socklen_t;
-  
-#else
   typedef ::iovec iovec;
-  typedef ::pid_t     pid_t;
-  typedef int       sock_t;
-  typedef ::socklen_t        socklen_t;
-  
-#endif // WIN32
+  typedef ::pid_t pid_t;
+  typedef int sock_t;
+  typedef ::socklen_t socklen_t;
 
   //! Closes a socket.
   static int closesocket( sock_t socket );
+
+  //! Connect with timeout
+  // Returns:
+  //    > 0 on success
+  //    -1 on error
+  //    0 on timeout
+  static int timed_connect(sock_t sock,
+    const sockaddr *addr,
+    socklen_t sockaddr_size,
+    int timeout_sec,
+    int timeout_usec);
 
   //! Returns the process id of the current process.
   static pid_t getpid( void );
@@ -187,8 +134,11 @@ public:
   //! Sets the random seed.
   static void srandom( unsigned int seed );
 
-  //! Drops the program's privileges.
-  static void dropPrivs( int uid, int gid );
+  //! Drops the program's group privileges.
+  static void dropGroupPrivs( int uid, int gid );
+
+  //! Drops the program's user privileges.
+  static void dropUserPrivs( int uid );
   
   //! Sets the socket into blocking mode.
   static bool setBlocking( Utility::sock_t socket );
@@ -206,7 +156,8 @@ public:
   static void usleep( unsigned long usec );
 
   static time_t timegm(struct tm *tm);
-  
+
+  static void gmtime_r(const time_t *timer, struct tm *tmbuf);
 };
 
 

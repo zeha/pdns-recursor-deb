@@ -6,6 +6,10 @@
     it under the terms of the GNU General Public License version 2 as 
     published by the Free Software Foundation
 
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -86,6 +90,10 @@ public:
     val=htonl(val);
   }
 
+  void xfrIP6(std::string &val) {
+    xfrBlob(val, 16);
+  }
+
   void xfrTime(uint32_t& val)
   {
     xfr32BitInt(val);
@@ -135,6 +143,8 @@ public:
 
   uint16_t d_pos;
 
+  bool eof() { return true; };
+
 private:
   uint16_t d_startrecordpos; // needed for getBlob later on
   uint16_t d_recordlen;      // ditto
@@ -147,6 +157,7 @@ class DNSRecordContent
 {
 public:
   static DNSRecordContent* mastermake(const DNSRecord &dr, PacketReader& pr);
+  static DNSRecordContent* mastermake(const DNSRecord &dr, PacketReader& pr, uint16_t opcode);
   static DNSRecordContent* mastermake(uint16_t qtype, uint16_t qclass, const string& zone);
 
   virtual std::string getZoneRepresentation() const = 0;

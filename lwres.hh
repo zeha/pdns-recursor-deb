@@ -5,7 +5,10 @@
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2
     as published by the Free Software Foundation
-    
+
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
 
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -24,19 +27,17 @@
 #include <sys/types.h>
 #include "misc.hh"
 #include "iputils.hh"
-#ifndef WIN32
-# include <netdb.h> 
-# include <unistd.h>
-# include <sys/time.h>
-# include <sys/uio.h>
-# include <fcntl.h>
-# include <sys/socket.h>
-# include <netinet/in.h>
-# include <arpa/inet.h>
-# undef res_mkquery
-#endif // WIN32
+#include <netdb.h>
+#include <unistd.h>
+#include <sys/time.h>
+#include <sys/uio.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#undef res_mkquery
 
-#include "ahuexception.hh"
+#include "pdnsexception.hh"
 #include "dns.hh"
 #include "namespaces.hh"
 
@@ -45,10 +46,10 @@ int asendto(const char *data, int len, int flags, const ComboAddress& ip, uint16
 int arecvfrom(char *data, int len, int flags, const ComboAddress& ip, int *d_len, uint16_t id, 
               const string& domain, uint16_t, int fd, struct timeval* now);
 
-class LWResException : public AhuException
+class LWResException : public PDNSException
 {
 public:
-  LWResException(const string &reason) : AhuException(reason){}
+  LWResException(const string &reason) : PDNSException(reason){}
 };
 
 //! LWRes class 

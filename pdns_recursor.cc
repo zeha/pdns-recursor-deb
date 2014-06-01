@@ -1,10 +1,14 @@
 /*
     PowerDNS Versatile Database Driven Nameserver
-    Copyright (C) 2003 - 2013  PowerDNS.COM BV
+    Copyright (C) 2003 - 2014  PowerDNS.COM BV
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License version 2 
     as published by the Free Software Foundation
+
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
 
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -16,23 +20,18 @@
     Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
-#ifndef WIN32
-# include <netdb.h>
-# include <sys/stat.h>
-# include <unistd.h>
-#else 
- #include "ntservice.hh"
- #include "recursorservice.hh"
-#endif // WIN32
-
+#include <netdb.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <boost/foreach.hpp>
-#include "json_ws.hh"
+#include "ws-recursor.hh"
 #include <pthread.h>
 #include "recpacketcache.hh"
 #include "utility.hh" 
 #include "dns_random.hh"
 #include <iostream>
 #include <errno.h>
+#include <boost/static_assert.hpp>
 #include <map>
 #include <set>
 #include "recursor_cache.hh"
@@ -65,6 +64,8 @@
 #include "mplexer.hh"
 #include "config.h"
 #include "lua-recursor.hh"
+#include "version.hh"
+#include "responsestats.hh"
 
 #ifndef RECURSOR
 #include "statbag.hh"
@@ -75,7 +76,10 @@ __thread FDMultiplexer* t_fdm;
 __thread unsigned int t_id;
 unsigned int g_maxTCPPerClient;
 unsigned int g_networkTimeoutMsec;
+uint64_t g_latencyStatSize;
 bool g_logCommonErrors;
+bool g_anyToTcp;
+uint16_t g_udpTruncationThreshold;
 __thread shared_ptr<RecursorLua>* t_pdl;
 __thread RemoteKeeper* t_remotes;
 __thread shared_ptr<Regex>* t_traceRegex;
@@ -104,7 +108,7 @@ bool g_quiet;
 
 bool g_weDistributeQueries; // if true, only 1 thread listens on the incoming query sockets
 
-static __thread NetmaskGroup* t_allowFrom;
+__thread NetmaskGroup* t_allowFrom;
 static NetmaskGroup* g_initialAllowFrom; // new thread needs to be setup with this
 
 NetmaskGroup* g_dontQuery;
@@ -126,7 +130,7 @@ unsigned int g_numThreads;
 //! used to send information to a newborn mthread
 struct DNSComboWriter {
   DNSComboWriter(const char* data, uint16_t len, const struct timeval& now) : d_mdp(data, len), d_now(now), 
-        											        d_tcp(false), d_socket(-1)
+                                                                                                        d_tcp(false), d_socket(-1)
   {}
   MOADNSParser d_mdp;
   void setRemote(const ComboAddress* sa)
@@ -185,12 +189,13 @@ int asendtcp(const string& data, Socket* sock)
 void handleTCPClientReadable(int fd, FDMultiplexer::funcparam_t& var);
 
 // -1 is error, 0 is timeout, 1 is success
-int arecvtcp(string& data, int len, Socket* sock) 
+int arecvtcp(string& data, int len, Socket* sock, bool incompleteOkay)
 {
   data.clear();
   PacketID pident;
   pident.sock=sock;
   pident.inNeeded=len;
+  pident.inIncompleteOkay=incompleteOkay;
   t_fdm->addReadFD(sock->getHandle(), handleTCPClientReadable, pident);
 
   int ret=MT->waitEvent(pident,&data, g_networkTimeoutMsec);
@@ -297,7 +302,7 @@ public:
   {
     socks_t::iterator i=d_socks.find(fd);
     if(i==d_socks.end()) {
-      throw AhuException("Trying to return a socket (fd="+lexical_cast<string>(fd)+") not in the pool");
+      throw PDNSException("Trying to return a socket (fd="+lexical_cast<string>(fd)+") not in the pool");
     }
     returnSocketLocked(i);
   }
@@ -306,7 +311,7 @@ public:
   void returnSocketLocked(socks_t::iterator& i)
   {
     if(i==d_socks.end()) {
-      throw AhuException("Trying to return a socket not in the pool");
+      throw PDNSException("Trying to return a socket not in the pool");
     }
     try {
       t_fdm->removeReadFD(*i);
@@ -329,7 +334,7 @@ public:
       return ret;
     
     if(ret<0) 
-      throw AhuException("Making a socket for resolver (family =)"+lexical_cast<string>(family)+"): "+stringerror());
+      throw PDNSException("Making a socket for resolver (family = "+lexical_cast<string>(family)+"): "+stringerror());
 
     Utility::setCloseOnExec(ret);
 
@@ -348,7 +353,7 @@ public:
         break;
     }
     if(!tries)
-      throw AhuException("Resolver binding to local query client socket: "+stringerror());
+      throw PDNSException("Resolver binding to local query client socket: "+stringerror());
     
     Utility::setNonBlocking(ret);
     return ret;
@@ -487,6 +492,8 @@ void updateRcodeStats(int res)
   }
 }
 
+ResponseStats g_rs;
+
 void startDoResolve(void *p)
 {
   DNSComboWriter* dc=(DNSComboWriter *)p;
@@ -495,10 +502,10 @@ void startDoResolve(void *p)
   try {
     loginfo=" (while setting loginfo)";
     loginfo=" ("+dc->d_mdp.d_qname+"/"+lexical_cast<string>(dc->d_mdp.d_qtype)+" from "+(dc->d_remote.toString())+")";
-    uint32_t maxanswersize= dc->d_tcp ? 65535 : 512;
+    uint32_t maxanswersize= dc->d_tcp ? 65535 : min((uint16_t) 512, g_udpTruncationThreshold);
     EDNSOpts edo;
-    if(getEDNSOpts(dc->d_mdp, &edo)) {
-      maxanswersize = min(edo.d_packetsize, (uint16_t) (dc->d_tcp ? 65535 : 1680));
+    if(getEDNSOpts(dc->d_mdp, &edo) && !dc->d_tcp) {
+      maxanswersize = min(edo.d_packetsize, g_udpTruncationThreshold);
     }
     
     vector<DNSResourceRecord> ret;
@@ -513,8 +520,21 @@ void startDoResolve(void *p)
     pw.getHeader()->id=dc->d_mdp.d_header.id;
     pw.getHeader()->rd=dc->d_mdp.d_header.rd;
 
+    uint32_t minTTL=std::numeric_limits<uint32_t>::max();
+
     SyncRes sr(dc->d_now);
     bool tracedQuery=false; // we could consider letting Lua know about this too
+    bool variableAnswer = false;
+
+    int res;
+
+    if(dc->d_mdp.d_qtype==QType::ANY && !dc->d_tcp && g_anyToTcp) {
+      pw.getHeader()->tc = 1;
+      res = 0;
+      variableAnswer = true;
+      goto sendit;
+    }
+
     if(t_traceRegex->get() && (*t_traceRegex)->match(dc->d_mdp.d_qname)) {
       sr.setLogMode(SyncRes::Store);
       tracedQuery=true;
@@ -528,32 +548,33 @@ void startDoResolve(void *p)
     if(!dc->d_mdp.d_header.rd)
       sr.setCacheOnly();
 
-    int res;
 
-    bool variableAnswer = false;
     // if there is a RecursorLua active, and it 'took' the query in preResolve, we don't launch beginResolve
     if(!t_pdl->get() || !(*t_pdl)->preresolve(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer)) {
        res = sr.beginResolve(dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), dc->d_mdp.d_qclass, ret);
 
       if(t_pdl->get()) {
         if(res == RCode::NoError) {
-      	  vector<DNSResourceRecord>::const_iterator i;
-      	  for(i=ret.begin(); i!=ret.end(); ++i) 
-    	      if(i->qtype.getCode() == dc->d_mdp.d_qtype && i->d_place == DNSResourceRecord::ANSWER)
-          		break;
-      	  if(i == ret.end())
-      	    (*t_pdl)->nodata(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
-      	}
-      	else if(res == RCode::NXDomain)
+                vector<DNSResourceRecord>::const_iterator i;
+                for(i=ret.begin(); i!=ret.end(); ++i) 
+                  if(i->qtype.getCode() == dc->d_mdp.d_qtype && i->d_place == DNSResourceRecord::ANSWER)
+                          break;
+                if(i == ret.end())
+                  (*t_pdl)->nodata(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
+              }
+              else if(res == RCode::NXDomain)
           (*t_pdl)->nxdomain(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
       
       (*t_pdl)->postresolve(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
       }
     }
     
-    uint32_t minTTL=std::numeric_limits<uint32_t>::max();
-      
-    if(tracedQuery || res < 0 || res == RCode::ServFail || pw.getHeader()->rcode == RCode::ServFail)
+    if(res == RecursorBehaviour::DROP) {
+      delete dc;
+      dc=0;
+      return;
+    }  
+    if(tracedQuery || res == RecursorBehaviour::PASS || res == RCode::ServFail || pw.getHeader()->rcode == RCode::ServFail)
     {
       string trace(sr.getTrace());
       if(!trace.empty()) {
@@ -565,8 +586,8 @@ void startDoResolve(void *p)
         }
       }
     }
-
-    if(res < 0) {
+    
+    if(res == RecursorBehaviour::PASS) {
       pw.getHeader()->rcode=RCode::ServFail;
       // no commit here, because no record
       g_stats.servFails++;
@@ -577,7 +598,6 @@ void startDoResolve(void *p)
       
       if(ret.size()) {
         orderAndShuffle(ret);
-        
         for(vector<DNSResourceRecord>::const_iterator i=ret.begin(); i!=ret.end(); ++i) {
           pw.startRecord(i->qname, i->qtype.getCode(), i->ttl, i->qclass, (DNSPacketWriter::Place)i->d_place); 
           minTTL = min(minTTL, i->ttl);
@@ -592,7 +612,10 @@ void startDoResolve(void *p)
           if(pw.size() > maxanswersize) {
             pw.rollback();
             if(i->d_place==DNSResourceRecord::ANSWER)  // only truncate if we actually omitted parts of the answer
+            {
               pw.getHeader()->tc=1;
+              pw.truncate();
+            }
             goto sendit; // need to jump over pw.commit
           }
         }
@@ -601,14 +624,16 @@ void startDoResolve(void *p)
       }
     }
   sendit:;
+    g_rs.submitResponse(dc->d_mdp.d_qtype, packet.size(), !dc->d_tcp);
     if(!dc->d_tcp) {
       sendto(dc->d_socket, (const char*)&*packet.begin(), packet.size(), 0, (struct sockaddr *)(&dc->d_remote), dc->d_remote.getSocklen());
       if(!SyncRes::s_nopacketcache && !variableAnswer ) {
-        t_packetCache->insertResponsePacket(string((const char*)&*packet.begin(), packet.size()), g_now.tv_sec, 
-        				   min(minTTL, 
-        				       (pw.getHeader()->rcode == RCode::ServFail) ? SyncRes::s_packetcacheservfailttl : SyncRes::s_packetcachettl
-        				       ) 
-        				  );
+        t_packetCache->insertResponsePacket(string((const char*)&*packet.begin(), packet.size()),
+                                            g_now.tv_sec, 
+                                            min(minTTL, 
+                                                (pw.getHeader()->rcode == RCode::ServFail) ? SyncRes::s_packetcacheservfailttl : SyncRes::s_packetcachettl
+                                            ) 
+        );
       }
     }
     else {
@@ -667,13 +692,13 @@ void startDoResolve(void *p)
       g_stats.answersSlow++;
 
     uint64_t newLat=(uint64_t)(spent*1000000);
-    if(newLat < 1000000)  // outliers of several minutes exist..
-      g_stats.avgLatencyUsec=(uint64_t)((1-0.0001)*g_stats.avgLatencyUsec + 0.0001*newLat);
-
+    newLat = min(newLat,(uint64_t)(g_networkTimeoutMsec*1000)); // outliers of several minutes exist..
+    g_stats.avgLatencyUsec=(1-1.0/g_latencyStatSize)*g_stats.avgLatencyUsec + (float)newLat/g_latencyStatSize;
+    // no worries, we do this for packet cache hits elsewhere
     delete dc;
     dc=0;
   }
-  catch(AhuException &ae) {
+  catch(PDNSException &ae) {
     L<<Logger::Error<<"startDoResolve problem"<<loginfo<<": "<<ae.reason<<endl;
     delete dc;
   }
@@ -694,13 +719,12 @@ void startDoResolve(void *p)
 
 void makeControlChannelSocket(int processNum=-1)
 {
-  string sockname=::arg()["socket-dir"]+"/pdns_recursor";
+  string sockname=::arg()["socket-dir"]+"/"+s_programname;
   if(processNum >= 0)
     sockname += "."+lexical_cast<string>(processNum);
   sockname+=".controlsocket";
   s_rcc.listen(sockname);
   
-#ifndef WIN32
   int sockowner = -1;
   int sockgroup = -1;
 
@@ -720,7 +744,6 @@ void makeControlChannelSocket(int processNum=-1)
     mode_t sockmode=::arg().asMode("socket-mode");
     chmod(sockname.c_str(), sockmode);
   }
-#endif
 }
 
 void handleRunningTCPQuestion(int fd, FDMultiplexer::funcparam_t& var)
@@ -851,8 +874,8 @@ string* doProcessUDPQuestion(const std::string& question, const ComboAddress& fr
     uint32_t age;
     if(!SyncRes::s_nopacketcache && t_packetCache->getResponsePacket(question, g_now.tv_sec, &response, &age)) {
       if(!g_quiet)
-	L<<Logger::Error<<t_id<< " question answered from packet cache from "<<fromaddr.toString()<<endl;
-
+        L<<Logger::Error<<t_id<< " question answered from packet cache from "<<fromaddr.toString()<<endl;
+      
       g_stats.packetCacheHits++;
       SyncRes::s_queries++;
       ageDNSPacket(response, age);
@@ -862,7 +885,7 @@ string* doProcessUDPQuestion(const std::string& question, const ComboAddress& fr
         memcpy(&dh, response.c_str(), sizeof(dh));
         updateRcodeStats(dh.rcode);
       }
-      g_stats.avgLatencyUsec=(uint64_t)((1-0.0001)*g_stats.avgLatencyUsec + 0); // we assume 0 usec
+      g_stats.avgLatencyUsec=(1-1.0/g_latencyStatSize)*g_stats.avgLatencyUsec + 0.0; // we assume 0 usec
       return 0;
     }
   } 
@@ -903,6 +926,14 @@ void handleNewUDPQuestion(int fd, FDMultiplexer::funcparam_t& var)
       g_stats.unauthorizedUDP++;
       return;
     }
+    BOOST_STATIC_ASSERT(offsetof(sockaddr_in, sin_port) == offsetof(sockaddr_in6, sin6_port));
+    if(!fromaddr.sin4.sin_port) { // also works for IPv6
+     if(!g_quiet) 
+        L<<Logger::Error<<"["<<MT->getTid()<<"] dropping UDP query from "<<fromaddr.toStringWithPort()<<", can't deal with port 0"<<endl;
+
+      g_stats.clientParseError++; // not quite the best place to put it, but needs to go somewhere
+      return;
+    }
     try {
       dnsheader* dh=(dnsheader*)data;
       
@@ -915,11 +946,11 @@ void handleNewUDPQuestion(int fd, FDMultiplexer::funcparam_t& var)
           L<<Logger::Error<<"Ignoring non-query opcode "<<dh->opcode<<" from "<<fromaddr.toString()<<" on server socket!"<<endl;
       }
       else {
-	string question(data, len);
-	if(g_weDistributeQueries)
-	  distributeAsyncFunction(boost::bind(doProcessUDPQuestion, question, fromaddr, fd));
-	else
-	  doProcessUDPQuestion(question, fromaddr, fd);
+        string question(data, len);
+        if(g_weDistributeQueries)
+          distributeAsyncFunction(question, boost::bind(doProcessUDPQuestion, question, fromaddr, fd));
+        else
+          doProcessUDPQuestion(question, fromaddr, fd);
       }
     }
     catch(MOADNSException& mde) {
@@ -946,7 +977,7 @@ void makeTCPServerSockets()
   stringtok(locals,::arg()["local-address"]," ,");
 
   if(locals.empty())
-    throw AhuException("No local address specified");
+    throw PDNSException("No local address specified");
   
   for(vector<string>::const_iterator i=locals.begin();i!=locals.end();++i) {
     ServiceTuple st;
@@ -960,14 +991,14 @@ void makeTCPServerSockets()
     if(!IpToU32(st.host, (uint32_t*)&sin.sin4.sin_addr.s_addr)) {
       sin.sin6.sin6_family = AF_INET6;
       if(makeIPv6sockaddr(st.host, &sin.sin6) < 0)
-        throw AhuException("Unable to resolve local address for TCP server on '"+ st.host +"'"); 
+        throw PDNSException("Unable to resolve local address for TCP server on '"+ st.host +"'"); 
     }
 
     fd=socket(sin.sin6.sin6_family, SOCK_STREAM, 0);
     Utility::setCloseOnExec(fd);
 
     if(fd<0) 
-      throw AhuException("Making a TCP server socket for resolver: "+stringerror());
+      throw PDNSException("Making a TCP server socket for resolver: "+stringerror());
 
     int tmp=1;
     if(setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,(char*)&tmp,sizeof tmp)<0) {
@@ -985,7 +1016,7 @@ void makeTCPServerSockets()
     sin.sin4.sin_port = htons(st.port);
     int socklen=sin.sin4.sin_family==AF_INET ? sizeof(sin.sin4) : sizeof(sin.sin6);
     if (::bind(fd, (struct sockaddr *)&sin, socklen )<0) 
-      throw AhuException("Binding TCP server socket for "+ st.host +": "+stringerror());
+      throw PDNSException("Binding TCP server socket for "+ st.host +": "+stringerror());
     
     Utility::setNonBlocking(fd);
     setSocketSendBuffer(fd, 65000);
@@ -1000,15 +1031,13 @@ void makeTCPServerSockets()
   }
 }
 
-
-
 void makeUDPServerSockets()
 {
   vector<string>locals;
   stringtok(locals,::arg()["local-address"]," ,");
 
   if(locals.empty())
-    throw AhuException("No local address specified");
+    throw PDNSException("No local address specified");
   
   if(::arg()["local-address"]=="0.0.0.0") {
     L<<Logger::Warning<<"It is advised to bind to explicit addresses with the --local-address option"<<endl;
@@ -1026,22 +1055,22 @@ void makeUDPServerSockets()
     if(!IpToU32(st.host.c_str() , (uint32_t*)&sin.sin4.sin_addr.s_addr)) {
       sin.sin6.sin6_family = AF_INET6;
       if(makeIPv6sockaddr(st.host, &sin.sin6) < 0)
-        throw AhuException("Unable to resolve local address for UDP server on '"+ st.host +"'"); 
+        throw PDNSException("Unable to resolve local address for UDP server on '"+ st.host +"'"); 
     }
     
     int fd=socket(sin.sin4.sin_family, SOCK_DGRAM, 0);
     Utility::setCloseOnExec(fd);
 
     if(fd < 0) {
-      throw AhuException("Making a UDP server socket for resolver: "+netstringerror());
+      throw PDNSException("Making a UDP server socket for resolver: "+netstringerror());
     }
 
-    setSocketReceiveBuffer(fd, 200000);
+    setSocketReceiveBuffer(fd, 250000);
     sin.sin4.sin_port = htons(st.port);
 
     int socklen=sin.sin4.sin_family==AF_INET ? sizeof(sin.sin4) : sizeof(sin.sin6);
     if (::bind(fd, (struct sockaddr *)&sin, socklen)<0) 
-      throw AhuException("Resolver binding to server socket on port "+ lexical_cast<string>(st.port) +" for "+ st.host+": "+stringerror());
+      throw PDNSException("Resolver binding to server socket on port "+ lexical_cast<string>(st.port) +" for "+ st.host+": "+stringerror());
     
     Utility::setNonBlocking(fd);
 
@@ -1055,7 +1084,6 @@ void makeUDPServerSockets()
 }
 
 
-#ifndef WIN32
 void daemonize(void)
 {
   if(fork())
@@ -1073,7 +1101,6 @@ void daemonize(void)
     close(i);
   }
 }
-#endif
 
 uint64_t counter;
 bool statsWanted;
@@ -1085,21 +1112,20 @@ void usr1Handler(int)
 
 void usr2Handler(int)
 {
-  SyncRes::setDefaultLogMode(SyncRes::Log);
-  g_quiet=false;
-  ::arg().set("quiet")="no";
-
+  g_quiet= !g_quiet;
+  SyncRes::setDefaultLogMode(g_quiet ? SyncRes::LogNone : SyncRes::Log);
+  ::arg().set("quiet")=g_quiet ? "" : "no";
 }
 
 void doStats(void)
 {
   static time_t lastOutputTime;
   static uint64_t lastQueryCount;
+
+  uint64_t cacheHits = broadcastAccFunction<uint64_t>(pleaseGetCacheHits);
+  uint64_t cacheMisses = broadcastAccFunction<uint64_t>(pleaseGetCacheMisses);
   
-  if(g_stats.qcounter && (t_RC->cacheHits + t_RC->cacheMisses) && SyncRes::s_queries && SyncRes::s_outqueries) {  // this only runs once thread 0 has had hits
-    uint64_t cacheHits = broadcastAccFunction<uint64_t>(pleaseGetCacheHits);
-    uint64_t cacheMisses = broadcastAccFunction<uint64_t>(pleaseGetCacheMisses);
-    
+  if(g_stats.qcounter && (cacheHits + cacheMisses) && SyncRes::s_queries && SyncRes::s_outqueries) {
     L<<Logger::Warning<<"stats: "<<g_stats.qcounter<<" questions, "<<
       broadcastAccFunction<uint64_t>(pleaseGetCacheSize)<< " cache entries, "<<
       broadcastAccFunction<uint64_t>(pleaseGetNegCacheSize)<<" negative entries, "<<
@@ -1164,7 +1190,7 @@ try
   }
   
   if(!t_id) {
-    if(now.tv_sec - last_stat > 1800) { 
+    if(now.tv_sec - last_stat >= 1800) { 
       doStats();
       last_stat=time(0);
     }
@@ -1185,7 +1211,7 @@ try
       L<<Logger::Error<<"Failed to update . records, RCODE="<<res<<endl;
   }
 }
-catch(AhuException& ae)
+catch(PDNSException& ae)
 {
   L<<Logger::Error<<"Fatal error: "<<ae.reason<<endl;
   throw;
@@ -1245,11 +1271,13 @@ void broadcastFunction(const pipefunc_t& func, bool skipSelf)
     }
   }
 }
-void distributeAsyncFunction(const pipefunc_t& func)
+
+uint32_t g_disthashseed;
+void distributeAsyncFunction(const std::string& question, const pipefunc_t& func)
 {
-  static unsigned int counter;
-  unsigned int target = 1 + (++counter % (g_pipes.size()-1));
-  // cerr<<"Sending to: "<<target<<endl;
+  unsigned int hash = hashQuestion(question.c_str(), question.length(), g_disthashseed);
+  unsigned int target = 1 + (hash % (g_pipes.size()-1));
+
   if(target == t_id) {
     func();
     return;
@@ -1260,8 +1288,7 @@ void distributeAsyncFunction(const pipefunc_t& func)
   tmsg->wantAnswer = false;
   
   if(write(tps.writeToThread, &tmsg, sizeof(tmsg)) != sizeof(tmsg))
-    unixDie("write to thread pipe returned wrong size or error");
-    
+    unixDie("write to thread pipe returned wrong size or error");    
 }
 
 void handlePipeRequest(int fd, FDMultiplexer::funcparam_t& var)
@@ -1272,7 +1299,16 @@ void handlePipeRequest(int fd, FDMultiplexer::funcparam_t& var)
     unixDie("read from thread pipe returned wrong size or error");
   }
   
-  void *resp = tmsg->func();
+  void *resp=0;
+  try {
+    resp = tmsg->func();
+  }
+  catch(std::exception& e) {
+    L<<Logger::Error<<"PIPE function we executed created exception: "<<e.what()<<endl; // but what if they wanted an answer.. we send 0
+  }
+  catch(PDNSException& e) {
+    L<<Logger::Error<<"PIPE function we executed created PDNS exception: "<<e.reason<<endl; // but what if they wanted an answer.. we send 0
+  }
   if(tmsg->wantAnswer)
     if(write(g_pipes[t_id].writeFromThread, &resp, sizeof(resp)) != sizeof(resp))
       unixDie("write to thread pipe returned wrong size or error");
@@ -1349,7 +1385,7 @@ void handleRCC(int fd, FDMultiplexer::funcparam_t& var)
   catch(std::exception& e) {
     L<<Logger::Error<<"Error dealing with control socket request: "<<e.what()<<endl;
   }
-  catch(AhuException& ae) {
+  catch(PDNSException& ae) {
     L<<Logger::Error<<"Error dealing with control socket request: "<<ae.reason<<endl;
   }
 }
@@ -1365,7 +1401,7 @@ void handleTCPClientReadable(int fd, FDMultiplexer::funcparam_t& var)
   if(ret > 0) {
     pident->inMSG.append(&buffer[0], &buffer[ret]);
     pident->inNeeded-=ret;
-    if(!pident->inNeeded) {
+    if(!pident->inNeeded || pident->inIncompleteOkay) {
       //      cerr<<"Got entire load of "<<pident->inMSG.size()<<" bytes"<<endl;
       PacketID pid=*pident;
       string msg=pident->inMSG;
@@ -1438,7 +1474,7 @@ void handleUDPServerResponse(int fd, FDMultiplexer::funcparam_t& var)
       g_stats.serverParseError++; 
       if(g_logCommonErrors)
         L<<Logger::Error<<"Unable to parse packet from remote UDP server "<< fromaddr.toString() <<
-          ": packet smalller than DNS header"<<endl;
+          ": packet smaller than DNS header"<<endl;
     }
 
     t_udpclientsocks->returnSocket(fd);
@@ -1460,7 +1496,7 @@ void handleUDPServerResponse(int fd, FDMultiplexer::funcparam_t& var)
   pident.id=dh.id;
   pident.fd=fd;
 
-  if(!dh.qr) {
+  if(!dh.qr && g_logCommonErrors) {
     L<<Logger::Warning<<"Not taking data from question on outgoing socket from "<< fromaddr.toStringWithPort()  <<endl;
   }
 
@@ -1579,7 +1615,7 @@ try
     return new string("ok\n");
   }
 }
-catch(AhuException& ae)
+catch(PDNSException& ae)
 {
   return new string(ae.reason+"\n");
 }
@@ -1589,6 +1625,35 @@ string doTraceRegex(vector<string>::const_iterator begin, vector<string>::const_
   return broadcastAccFunction<string>(boost::bind(pleaseUseNewTraceRegex, begin!=end ? *begin : ""));
 }
 
+static void checkLinuxIPv6Limits()
+{
+#ifdef __linux__
+  string line;
+  if(readFileIfThere("/proc/sys/net/ipv6/route/max_size", &line)) {
+    int lim=atoi(line.c_str());
+    if(lim < 16384) {
+      L<<Logger::Error<<"If using IPv6, please raise sysctl net.ipv6.route.max_size, currently set to "<<lim<<" which is < 16384"<<endl;
+    }
+  }
+#endif
+}
+static void checkOrFixFDS()
+{
+  unsigned int availFDs=getFilenumLimit();
+  if(g_maxMThreads * g_numThreads > availFDs) {
+    if(getFilenumLimit(true) >= g_maxMThreads * g_numThreads) {
+      setFilenumLimit(g_maxMThreads * g_numThreads);
+      L<<Logger::Warning<<"Raised soft limit on number of filedescriptors to "<<g_maxMThreads * g_numThreads<<" to match max-mthreads and threads settings"<<endl;
+    }
+    else {
+      int newval = getFilenumLimit(true) / g_numThreads;
+      L<<Logger::Warning<<"Insufficient number of filedescriptors available for max-mthreads*threads setting! ("<<availFDs<<" < "<<g_maxMThreads*g_numThreads<<"), reducing max-mthreads to "<<newval<<endl;
+      g_maxMThreads = newval;
+      setFilenumLimit(g_maxMThreads * g_numThreads);
+    }
+  }
+
+}
 
 void* recursorThread(void*);
 
@@ -1611,8 +1676,20 @@ void parseACLs()
     
     if(!::arg().preParseFile(configname.c_str(), "allow-from-file")) 
       L<<Logger::Warning<<"Unable to re-parse configuration file '"<<configname<<"'"<<endl;
-    ::arg().preParse(g_argc, g_argv, "allow-from-file");
     ::arg().preParseFile(configname.c_str(), "allow-from", LOCAL_NETS);
+    ::arg().preParseFile(configname.c_str(), "include-dir");
+    ::arg().preParse(g_argc, g_argv, "include-dir");
+
+    // then process includes
+    std::vector<std::string> extraConfigs;
+    ::arg().gatherIncludes(extraConfigs);
+
+    BOOST_FOREACH(const std::string& fn, extraConfigs) {
+      ::arg().preParseFile(fn.c_str(), "allow-from-file", ::arg()["allow-from-file"]);
+      ::arg().preParseFile(fn.c_str(), "allow-from", ::arg()["allow-from"]);
+    }
+
+    ::arg().preParse(g_argc, g_argv, "allow-from-file");
     ::arg().preParse(g_argc, g_argv, "allow-from");
   }
 
@@ -1668,7 +1745,7 @@ void parseACLs()
 
 int serviceMain(int argc, char*argv[])
 {
-  L.setName("pdns_recursor");
+  L.setName(s_programname);
 
   L.setLoglevel((Logger::Urgency)(6)); // info and up
 
@@ -1680,29 +1757,9 @@ int serviceMain(int argc, char*argv[])
       L<<Logger::Error<<"Unknown logging facility "<<::arg().asNum("logging-facility") <<endl;
   }
 
-  L<<Logger::Warning<<"PowerDNS recursor "<<VERSION<<" (C) 2001-2013 PowerDNS.COM BV ("<<__DATE__", "__TIME__;
-#ifdef __GNUC__
-  L<<", gcc "__VERSION__;
-#endif // add other compilers here
-#ifdef _MSC_VER
-  L<<", MSVC "<<_MSC_VER;
-#endif
-  L<<") starting up"<<endl;
-  
-  L<<Logger::Warning<<"PowerDNS comes with ABSOLUTELY NO WARRANTY. "
-    "This is free software, and you are welcome to redistribute it "
-    "according to the terms of the GPL version 2."<<endl;
-  
-  L<<Logger::Warning<<"Operating in "<<(sizeof(unsigned long)*8) <<" bits mode"<<endl;
-  
-  #if 0
-  unsigned int maxFDs, curFDs;
-  getFDLimits(curFDs, maxFDs);
-  if(curFDs < 2048) 
-    L<<Logger::Warning<<"Only "<<curFDs<<" file descriptors available (out of: "<<maxFDs<<"), may not be suitable for high performance"<<endl;
-  #endif
-  
+  showProductVersion();
   seedRandom(::arg()["entropy-source"]);
+  g_disthashseed=dns_random(0xffffffff);
 
   parseACLs();
   
@@ -1738,7 +1795,9 @@ int serviceMain(int argc, char*argv[])
     g_quiet=false;
   }
   
-  
+  SyncRes::s_minimumTTL = ::arg().asNum("minimum-ttl-override");
+
+  checkLinuxIPv6Limits();
   try {
     vector<string> addrs;  
     if(!::arg()["query-local-address6"].empty()) {
@@ -1767,8 +1826,11 @@ int serviceMain(int argc, char*argv[])
   SyncRes::s_doAAAAAdditionalProcessing = ::arg().mustDo("aaaa-additional-processing");
   SyncRes::s_doAdditionalProcessing = ::arg().mustDo("additional-processing") | SyncRes::s_doAAAAAdditionalProcessing;
   
-  SyncRes::s_noEDNSPing = ::arg().mustDo("disable-edns-ping");
+  SyncRes::s_noEDNSPing = true; // ::arg().mustDo("disable-edns-ping");
   SyncRes::s_noEDNS = ::arg().mustDo("disable-edns");
+  if(!SyncRes::s_noEDNS) {
+    L<<Logger::Warning<<"Running in experimental EDNS mode - may cause problems"<<endl;
+  }
 
   SyncRes::s_nopacketcache = ::arg().mustDo("disable-packetcache");
 
@@ -1776,6 +1838,8 @@ int serviceMain(int argc, char*argv[])
   SyncRes::s_maxcachettl=::arg().asNum("max-cache-ttl");
   SyncRes::s_packetcachettl=::arg().asNum("packetcache-ttl");
   SyncRes::s_packetcacheservfailttl=::arg().asNum("packetcache-servfail-ttl");
+  SyncRes::s_serverdownmaxfails=::arg().asNum("server-down-max-fails");
+  SyncRes::s_serverdownthrottletime=::arg().asNum("server-down-throttle-time");
   SyncRes::s_serverID=::arg()["server-id"];
   if(SyncRes::s_serverID.empty()) {
     char tmp[128];
@@ -1787,9 +1851,13 @@ int serviceMain(int argc, char*argv[])
 
   g_initialDomainMap = parseAuthAndForwards();
  
+  g_latencyStatSize=::arg().asNum("latency-statistic-size");
     
   g_logCommonErrors=::arg().mustDo("log-common-errors");
-  
+
+  g_anyToTcp = ::arg().mustDo("any-to-tcp");
+  g_udpTruncationThreshold = ::arg().asNum("udp-truncation-threshold");
+
   makeUDPServerSockets();
   makeTCPServerSockets();
 
@@ -1803,7 +1871,6 @@ int serviceMain(int argc, char*argv[])
   if(!s_pidfname.empty())
     unlink(s_pidfname.c_str()); // remove possible old pid file 
   
-#ifndef WIN32
   if(::arg().mustDo("daemon")) {
     L<<Logger::Warning<<"Calling daemonize, going to background"<<endl;
     L.toConsole(Logger::Critical);
@@ -1813,7 +1880,6 @@ int serviceMain(int argc, char*argv[])
   signal(SIGUSR2,usr2Handler);
   signal(SIGPIPE,SIG_IGN);
   writePid();
-#endif
   makeControlChannelSocket( ::arg().asNum("processes") > 1 ? forks : -1);
   
   int newgid=0;
@@ -1823,6 +1889,8 @@ int serviceMain(int argc, char*argv[])
   if(!::arg()["setuid"].empty())
     newuid=Utility::makeUidNumeric(::arg()["setuid"]);
 
+  Utility::dropGroupPrivs(newuid, newgid);
+
   if (!::arg()["chroot"].empty()) {
     if (chroot(::arg()["chroot"].c_str())<0 || chdir("/") < 0) {
       L<<Logger::Error<<"Unable to chroot to '"+::arg()["chroot"]+"': "<<strerror (errno)<<", exiting"<<endl;
@@ -1830,14 +1898,15 @@ int serviceMain(int argc, char*argv[])
     }
   }
 
-  Utility::dropPrivs(newuid, newgid);
+  Utility::dropUserPrivs(newuid);
   g_numThreads = ::arg().asNum("threads") + ::arg().mustDo("pdns-distributes-queries");
   
   makeThreadPipes();
   
   g_tcpTimeout=::arg().asNum("client-tcp-timeout");
   g_maxTCPPerClient=::arg().asNum("max-tcp-per-client");
-  g_maxMThreads=::arg().asNum("max-mthreads");
+  g_maxMThreads=::arg().asNum("max-mthreads");	
+  checkOrFixFDS();
 
   if(g_numThreads == 1) {
     L<<Logger::Warning<<"Operating unthreaded"<<endl;
@@ -1902,9 +1971,15 @@ try
 
   t_fdm=getMultiplexer();
   if(!t_id) {
-    if(::arg().mustDo("experimental-json-interface")) {
-      L<<Logger::Warning << "Enabling JSON interface" << endl;
-      new JWebserver(t_fdm);
+    if(::arg().mustDo("experimental-webserver")) {
+      L<<Logger::Warning << "Enabling web server" << endl;
+      try {
+        new RecursorWebServer(t_fdm);
+      }
+      catch(PDNSException &e) {
+        L<<Logger::Error<<"Exception: "<<e.reason<<endl;
+        exit(99);
+      }
     }
     L<<Logger::Error<<"Enabled '"<< t_fdm->getName() << "' multiplexer"<<endl;
   }
@@ -1923,6 +1998,8 @@ try
   
   bool listenOnTCP(true);
 
+  time_t last_carbon=0;
+  time_t carbonInterval=::arg().asNum("carbon-interval");
   counter=0; // used to periodically execute certain tasks
   for(;;) {
     while(MT->schedule(&g_now)); // MTasker letting the mthreads do their thing
@@ -1950,26 +2027,34 @@ try
     }
 
     Utility::gettimeofday(&g_now, 0);
+
+    if(!t_id && (g_now.tv_sec - last_carbon >= carbonInterval)) {
+      MT->makeThread(doCarbonDump, 0);
+      last_carbon = g_now.tv_sec;
+    }
+
     t_fdm->run(&g_now);
     // 'run' updates g_now for us
 
-    if(listenOnTCP) {
-      if(TCPConnection::getCurrentConnections() > maxTcpClients) {  // shutdown, too many connections
-        for(tcpListenSockets_t::iterator i=g_tcpListenSockets.begin(); i != g_tcpListenSockets.end(); ++i)
-          t_fdm->removeReadFD(*i);
-        listenOnTCP=false;
+    if(!g_weDistributeQueries || !t_id) { // if pdns distributes queries, only tid 0 should do this
+      if(listenOnTCP) {
+	if(TCPConnection::getCurrentConnections() > maxTcpClients) {  // shutdown, too many connections
+	  for(tcpListenSockets_t::iterator i=g_tcpListenSockets.begin(); i != g_tcpListenSockets.end(); ++i)
+	    t_fdm->removeReadFD(*i);
+	  listenOnTCP=false;
+	}
       }
-    }
-    else {
-      if(TCPConnection::getCurrentConnections() <= maxTcpClients) {  // reenable
-        for(tcpListenSockets_t::iterator i=g_tcpListenSockets.begin(); i != g_tcpListenSockets.end(); ++i)
-          t_fdm->addReadFD(*i, handleNewTCPQuestion);
-        listenOnTCP=true;
+      else {
+	if(TCPConnection::getCurrentConnections() <= maxTcpClients) {  // reenable
+	  for(tcpListenSockets_t::iterator i=g_tcpListenSockets.begin(); i != g_tcpListenSockets.end(); ++i)
+	    t_fdm->addReadFD(*i, handleNewTCPQuestion);
+	  listenOnTCP=true;
+	}
       }
     }
   }
 }
-catch(AhuException &ae) {
+catch(PDNSException &ae) {
   L<<Logger::Error<<"Exception: "<<ae.reason<<endl;
   return 0;
 }
@@ -1982,43 +2067,17 @@ catch(...) {
    return 0;
 }
 
-#ifdef WIN32
-void doWindowsServiceArguments(RecursorService& recursor)
-{
-  if(::arg().mustDo( "register-service" )) {
-    if ( !recursor.registerService( "The PowerDNS Recursor.", true )) {
-      cerr << "Could not register service." << endl;
-      exit( 99 );
-    }
-    
-    exit( 0 );
-  }
-
-  if ( ::arg().mustDo( "unregister-service" )) {
-    recursor.unregisterService();
-    exit( 0 );
-  }
-}
-#endif
-
 
 int main(int argc, char **argv) 
 {
   g_argc = argc;
   g_argv = argv;
   g_stats.startupTime=time(0);
+  versionSetProduct(ProductRecursor);
   reportBasicTypes();
   reportOtherTypes();
 
   int ret = EXIT_SUCCESS;
-#ifdef WIN32
-  RecursorService service;
-  WSADATA wsaData;
-  if(WSAStartup( MAKEWORD( 2, 2 ), &wsaData )) {
-    cerr<<"Unable to initialize winsock\n";
-    exit(1);
-  }
-#endif // WIN32
 
   try {
     ::arg().set("stack-size","stack size per mthread")="200000";
@@ -2031,6 +2090,7 @@ int main(int argc, char **argv)
     ::arg().set("local-address","IP addresses to listen on, separated by spaces or commas. Also accepts ports.")="127.0.0.1";
     ::arg().set("trace","if we should output heaps of logging. set to 'fail' to only log failing domains")="off";
     ::arg().set("daemon","Operate as a daemon")="yes";
+    ::arg().set("loglevel","Amount of logging. Higher is more. Do not set below 3")="4";
     ::arg().set("log-common-errors","If we should log rather common errors")="yes";
     ::arg().set("chroot","switch to chroot jail")="";
     ::arg().set("setgid","If set, change group id to this gid for more security")="";
@@ -2038,25 +2098,23 @@ int main(int argc, char **argv)
     ::arg().set("network-timeout", "Wait this nummer of milliseconds for network i/o")="1500";
     ::arg().set("threads", "Launch this number of threads")="2";
     ::arg().set("processes", "Launch this number of processes (EXPERIMENTAL, DO NOT CHANGE)")="1";
-#ifdef WIN32
-    ::arg().set("quiet","Suppress logging of questions and answers")="off";
-    ::arg().setSwitch( "register-service", "Register the service" )= "no";
-    ::arg().setSwitch( "unregister-service", "Unregister the service" )= "no";
-    ::arg().setSwitch( "ntservice", "Run as service" )= "no";
-    ::arg().setSwitch( "use-ntlog", "Use the NT logging facilities" )= "yes"; 
-    ::arg().setSwitch( "use-logfile", "Use a log file" )= "no"; 
-#else
+    ::arg().set("config-name","Name of this virtual configuration - will rename the binary image")="";
     ::arg().set( "experimental-logfile", "Filename of the log file for JSON parser" )= "/var/log/pdns.log"; 
-    ::arg().setSwitch( "experimental-json-interface", "If we should run a JSON webserver") = "no";
+    ::arg().setSwitch("experimental-webserver", "Start a webserver for monitoring") = "no";
+    ::arg().set("experimental-webserver-address", "IP Address of webserver to listen on") = "127.0.0.1";
+    ::arg().set("experimental-webserver-port", "Port of webserver to listen on") = "8082";
+    ::arg().set("experimental-webserver-password", "Password required for accessing the webserver") = "";
+    ::arg().set("experimental-api-config-dir", "Directory where REST API stores config and zones") = "";
+    ::arg().set("carbon-ourname", "If set, overrides our reported hostname for carbon stats")="";
+    ::arg().set("carbon-server", "If set, send metrics in carbon (graphite) format to this server")="";
+    ::arg().set("carbon-interval", "Number of seconds between carbon (graphite) updates")="30";
+    ::arg().set("experimental-api-readonly", "If the JSON API should disallow data modification") = "no";
     ::arg().set("quiet","Suppress logging of questions and answers")="";
     ::arg().set("logging-facility","Facility to log messages as. 0 corresponds to local0")="";
-#endif
     ::arg().set("config-dir","Location of configuration directory (recursor.conf)")=SYSCONFDIR;
-#ifndef WIN32
     ::arg().set("socket-owner","Owner of socket")="";
     ::arg().set("socket-group","Group of socket")="";
     ::arg().set("socket-mode", "Permissions for socket")="";
-#endif
     
     ::arg().set("socket-dir","Where the controlsocket will live")=LOCALSTATEDIR;
     ::arg().set("delegation-only","Which domains we only accept delegations from")="";
@@ -2065,6 +2123,8 @@ int main(int argc, char **argv)
     ::arg().set("client-tcp-timeout","Timeout in seconds when talking to TCP clients")="2";
     ::arg().set("max-mthreads", "Maximum number of simultaneous Mtasker threads")="2048";
     ::arg().set("max-tcp-clients","Maximum number of simultaneous TCP clients")="128";
+    ::arg().set("server-down-max-fails","Maximum number of consecutive timeouts (and unreachables) to mark a server as down ( 0 => disabled )")="64";
+    ::arg().set("server-down-throttle-time","Number of seconds to throttle all queries to a server after being maked as down")="60";
     ::arg().set("hint-file", "If set, load root hints from this file")="";
     ::arg().set("max-cache-entries", "If set, maximum number of entries in the main cache")="1000000";
     ::arg().set("max-negative-ttl", "maximum number of seconds to keep a negative cached entry in memory")="3600";
@@ -2074,7 +2134,7 @@ int main(int argc, char **argv)
     ::arg().set("packetcache-servfail-ttl", "maximum number of seconds to keep a cached servfail entry in packetcache")="60";
     ::arg().set("server-id", "Returned when queried for 'server.id' TXT or NSID, defaults to hostname")="";
     ::arg().set("remotes-ringbuffer-entries", "maximum number of packets to store statistics for")="0";
-    ::arg().set("version-string", "string reported on version.pdns or version.bind")="PowerDNS Recursor "VERSION" $Id$";
+    ::arg().set("version-string", "string reported on version.pdns or version.bind")=fullVersionString();
     ::arg().set("allow-from", "If set, only allow these comma separated netmasks to recurse")=LOCAL_NETS;
     ::arg().set("allow-from-file", "If set, load allowed netmasks from this file")="";
     ::arg().set("entropy-source", "If set, read entropy from this file")="/dev/urandom";
@@ -2091,27 +2151,34 @@ int main(int argc, char **argv)
     ::arg().set("etc-hosts-file", "Path to 'hosts' file")="/etc/hosts";
     ::arg().set("serve-rfc1918", "If we should be authoritative for RFC 1918 private IP space")="";
     ::arg().set("lua-dns-script", "Filename containing an optional 'lua' script that will be used to modify dns answers")="";
-    ::arg().setSwitch( "ignore-rd-bit", "Assume each packet requires recursion, for compatibility" )= "off"; 
-    ::arg().setSwitch( "disable-edns-ping", "Disable EDNSPing" )= "no"; 
-    ::arg().setSwitch( "disable-edns", "Disable EDNS" )= ""; 
+    ::arg().set("latency-statistic-size","Number of latency values to calculate the qa-latency average")="10000";
+//    ::arg().setSwitch( "disable-edns-ping", "Disable EDNSPing - EXPERIMENTAL, LEAVE DISABLED" )= "no"; 
+    ::arg().setSwitch( "disable-edns", "Disable EDNS - EXPERIMENTAL, LEAVE DISABLED" )= ""; 
     ::arg().setSwitch( "disable-packetcache", "Disable packetcache" )= "no"; 
     ::arg().setSwitch( "pdns-distributes-queries", "If PowerDNS itself should distribute queries over threads (EXPERIMENTAL)")="no";
-    
+    ::arg().setSwitch( "any-to-tcp","Answer ANY queries with tc=1, shunting to TCP" )="no";
+    ::arg().set("udp-truncation-threshold", "Maximum UDP response size before we truncate")="1680";
+    ::arg().set("minimum-ttl-override", "Set under adverse conditions, a minimum TTL")="0";
+
+    ::arg().set("include-dir","Include *.conf files from this directory")="";
 
     ::arg().setCmd("help","Provide a helpful message");
-    ::arg().setCmd("version","Print version string ("VERSION")");
+    ::arg().setCmd("version","Print version string");
     ::arg().setCmd("config","Output blank configuration");
     L.toConsole(Logger::Info);
     ::arg().laxParse(argc,argv); // do a lax parse
+
+    string configname=::arg()["config-dir"]+"/recursor.conf";
+    if(::arg()["config-name"]!="") {
+      configname=::arg()["config-dir"]+"/recursor-"+::arg()["config-name"]+".conf";
+      s_programname+="-"+::arg()["config-name"];
+    }
+    cleanSlashes(configname);
 
     if(::arg().mustDo("config")) {
       cout<<::arg().configstring()<<endl;
       exit(0);
     }
-
-
-    string configname=::arg()["config-dir"]+"/recursor.conf";
-    cleanSlashes(configname);
 
     if(!::arg().file(configname.c_str())) 
       L<<Logger::Warning<<"Unable to parse configuration file '"<<configname<<"'"<<endl;
@@ -2121,25 +2188,25 @@ int main(int argc, char **argv)
     ::arg().set("delegation-only")=toLower(::arg()["delegation-only"]);
 
     if(::arg().mustDo("help")) {
-      cerr<<"syntax:"<<endl<<endl;
-      cerr<<::arg().helpstring(::arg()["help"])<<endl;
-      exit(99);
+      cout<<"syntax:"<<endl<<endl;
+      cout<<::arg().helpstring(::arg()["help"])<<endl;
+      exit(0);
     }
     if(::arg().mustDo("version")) {
-      cerr<<"version: "VERSION<<endl;
+      showProductVersion();
+      showBuildConfiguration();
       exit(99);
     }
 
-#ifndef WIN32
-    serviceMain(argc, argv);
-#else
-    doWindowsServiceArguments(service);
-        L.toNTLog();
-    RecursorService::instance()->start( argc, argv, ::arg().mustDo( "ntservice" )); 
-#endif
+    Logger::Urgency logUrgency = (Logger::Urgency)::arg().asNum("loglevel");
+    if (logUrgency < Logger::Error)
+      logUrgency = Logger::Error;
+    L.setLoglevel(logUrgency);
+    L.toConsole(logUrgency);
 
+    serviceMain(argc, argv);
   }
-  catch(AhuException &ae) {
+  catch(PDNSException &ae) {
     L<<Logger::Error<<"Exception: "<<ae.reason<<endl;
     ret=EXIT_FAILURE;
   }
@@ -2152,9 +2219,5 @@ int main(int argc, char **argv)
     ret=EXIT_FAILURE;
   }
   
-#ifdef WIN32
-  WSACleanup();
-#endif // WIN32
-
   return ret;
 }

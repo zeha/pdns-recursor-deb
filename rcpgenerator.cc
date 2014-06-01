@@ -6,6 +6,10 @@
     it under the terms of the GNU General Public License version 2 as 
     published by the Free Software Foundation
 
+    Additionally, the license of this program contains a special
+    exception which allows to distribute the program in binary form when
+    it is linked against OpenSSL.
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -123,6 +127,33 @@ void RecordTextReader::xfrIP(uint32_t &val)
   val=ntohl(val);
 }
 
+
+void RecordTextReader::xfrIP6(std::string &val)
+{
+  struct in6_addr tmpbuf;
+
+  skipSpaces();
+  
+  size_t len;
+  // lookup end of value
+  for(len=0; 
+    d_pos+len < d_string.length() && (isxdigit(d_string.at(d_pos+len)) || d_string.at(d_pos+len) == ':');
+    len++);
+
+  if(!len)
+    throw RecordTextException("while parsing IPv6 address, expected xdigits at position "+lexical_cast<string>(d_pos)+" in '"+d_string+"'");
+
+  // end of value is here, try parse as IPv6
+  string address=d_string.substr(d_pos, len);
+  
+  if (inet_pton(AF_INET6, address.c_str(), &tmpbuf) != 1) {
+    throw RecordTextException("while parsing IPv6 address: '" + address + "' is invalid");
+  }
+
+  val = std::string((char*)tmpbuf.s6_addr, 16);
+
+  d_pos += len;
+}
 
 bool RecordTextReader::eof()
 {
@@ -273,7 +304,7 @@ void RecordTextWriter::xfrBase32HexBlob(const string& val)
   if(!d_string.empty())
     d_string.append(1,' ');
 
-  d_string.append(toBase32Hex(val));
+  d_string.append(toUpper(toBase32Hex(val)));
 }
 
 
@@ -400,6 +431,21 @@ void RecordTextWriter::xfrIP(const uint32_t& val)
   d_string.append(tmp, pos);
 }
 
+void RecordTextWriter::xfrIP6(const std::string& val)
+{
+  char tmpbuf[16];
+  char addrbuf[40];
+
+  if(!d_string.empty())
+   d_string.append(1,' ');
+  
+  val.copy(tmpbuf,16);
+
+  if (inet_ntop(AF_INET6, tmpbuf, addrbuf, sizeof addrbuf) == NULL)
+    throw RecordTextException("Unable to convert to ipv6 address");
+  
+  d_string += std::string(addrbuf);
+}
 
 void RecordTextWriter::xfrTime(const uint32_t& val)
 {
@@ -408,16 +454,8 @@ void RecordTextWriter::xfrTime(const uint32_t& val)
   
   struct tm tm;
   time_t time=val; // Y2038 bug!
-#ifndef WIN32
-  gmtime_r(&time, &tm);
-#else
-  struct tm* tmptr;
-  tmptr=gmtime(&time);
-  if(!tmptr)
-    throw RecordTextException("Unable to convert timestamp into pretty printable time");
-  tm=*tmptr;
-#endif
-  
+  Utility::gmtime_r(&time, &tm);
+
   char tmp[16];
   snprintf(tmp,sizeof(tmp)-1, "%04d%02d%02d" "%02d%02d%02d", 
            tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday, 
