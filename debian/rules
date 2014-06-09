@@ -2,6 +2,8 @@
 
 # Enable lua
 export LUA := 1
+export LUA_CPPFLAGS_CONFIG := $(shell pkg-config lua5.2 --cflags)
+export LUA_LIBS_CONFIG := $(shell pkg-config lua5.2 --libs)
 
 # Use new build system
 %:
