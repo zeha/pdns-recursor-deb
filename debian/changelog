@@ -1,3 +1,9 @@
+pdns-recursor (3.6.0~rc1-2) unstable; urgency=medium
+
+  * Switch to Lua 5.2
+
+ -- Christian Hofstaedtler <zeha@debian.org>  Mon, 09 Jun 2014 20:12:24 +0200
+
 pdns-recursor (3.6.0~rc1-1) unstable; urgency=medium
 
   * Imported Upstream version 3.6.0~rc1
