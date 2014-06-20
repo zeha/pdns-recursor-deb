@@ -9,7 +9,7 @@ Release:		1
 Epoch:			0
 Group:			System Environment/Daemons
 License:		GPL
-Source:			http://downloads.powerdns.com/releases/%{name}-3.6.0-rc1.tar.bz2
+Source:			http://downloads.powerdns.com/releases/%{name}-3.6.0.tar.bz2
 
 BuildRequires:		boost-devel >= 1.39.0
 BuildRequires:		lua-devel >= 5.2
@@ -20,7 +20,7 @@ BuildRoot:		%{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 PowerDNS recursor
 
 %prep
-%setup -q -n %{name}-3.6.0-rc1
+%setup -q -n %{name}-3.6.0
 
 %build
 %configure
