@@ -1,3 +1,10 @@
+pdns-recursor (3.6.0-1) unstable; urgency=medium
+
+  * Imported Upstream version 3.6.0
+  * Drop upstream applied patches 1443, 1444, 1445
+
+ -- Christian Hofstaedtler <zeha@debian.org>  Fri, 20 Jun 2014 12:34:10 +0200
+
 pdns-recursor (3.6.0~rc1-2) unstable; urgency=medium
 
   * Switch to Lua 5.2
