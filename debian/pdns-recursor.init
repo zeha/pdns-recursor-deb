@@ -156,10 +156,12 @@ case "$1" in
   force-stop)
     killall -v -9 pdns_recursor
     echo "killed"
-    ;;
-
+  ;;
+  status)
+    status_of_proc -p $PIDFILE $DAEMON $NAME && exit 0 || exit $?
+  ;;
   *)
-    echo "Usage: $0 {start|stop|restart|force-reload|force-stop}" >&2
+    echo "Usage: $0 {start|stop|restart|force-reload|force-stop|status}" >&2
     exit 3
   ;;
 esac
