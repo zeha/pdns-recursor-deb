@@ -1,3 +1,20 @@
+pdns-recursor (3.6.0-2) unstable; urgency=medium
+
+  [ Christian Hofstaedtler ]
+  * Update debian/copyright file
+  * Remove boilerplate from debian/watch
+  * Update init script options:
+    Removed X-Start-After and X-Stop-Before, which were sent to irrelevant
+    services, and updated Description fields.
+  * Add status target to init script.
+    Thanks to Iain Georgeson <debian@iain.georgeson.me.uk> (Closes: #730684)
+
+  [ SATOH Fumiyasu ]
+  * Enable resolvconf hooks only when $RESOLVCONF is set to 'yes'
+    (Closes: #722659)
+
+ -- Christian Hofstaedtler <zeha@debian.org>  Tue, 24 Jun 2014 13:27:38 +0200
+
 pdns-recursor (3.6.0-1) unstable; urgency=medium
 
   * Imported Upstream version 3.6.0
