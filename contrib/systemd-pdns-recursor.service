@@ -1,6 +1,7 @@
 [Unit]
 Description=PowerDNS recursing nameserver
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=forking
