@@ -7,7 +7,7 @@ export LUA_LIBS_CONFIG := $(shell pkg-config lua5.2 --libs)
 
 # Use new build system
 %:
-	dh $@ --parallel
+	dh $@ --with systemd --parallel
 
 override_dh_auto_install:
 	dh_auto_install -- STRIP_BINARIES=0
