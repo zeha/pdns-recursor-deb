@@ -1,3 +1,12 @@
+pdns-recursor (3.6.1-2) unstable; urgency=medium
+
+  * Drop patch 'pdns-recursor-less-chatty'
+  * Ship native systemd unit file
+  * Enable extra hardening flags (PIE, bindnow)
+  * Add smoke test, testing example.org resolution
+
+ -- Christian Hofstaedtler <zeha@debian.org>  Sat, 13 Sep 2014 19:21:43 +0200
+
 pdns-recursor (3.6.1-1) unstable; urgency=high
 
   * Imported Upstream version 3.6.1
