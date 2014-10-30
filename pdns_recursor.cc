@@ -66,7 +66,7 @@
 #include "lua-recursor.hh"
 #include "version.hh"
 #include "responsestats.hh"
-
+#include "secpoll-recursor.hh"
 #ifndef RECURSOR
 #include "statbag.hh"
 StatBag S;
@@ -119,7 +119,8 @@ tcpListenSockets_t g_tcpListenSockets;   // shared across threads, but this is f
 int g_tcpTimeout;
 unsigned int g_maxMThreads;
 struct timeval g_now; // timestamp, updated (too) frequently
-map<int, ComboAddress> g_listenSocketsAddresses; // is shared across all threads right now
+typedef map<int, ComboAddress> listenSocketsAddresses_t; // is shared across all threads right now
+listenSocketsAddresses_t g_listenSocketsAddresses; // is shared across all threads right now
 
 __thread MT_t* MT; // the big MTasker
 
@@ -507,7 +508,8 @@ void startDoResolve(void *p)
     if(getEDNSOpts(dc->d_mdp, &edo) && !dc->d_tcp) {
       maxanswersize = min(edo.d_packetsize, g_udpTruncationThreshold);
     }
-    
+    ComboAddress local;    
+    listenSocketsAddresses_t::const_iterator lociter;
     vector<DNSResourceRecord> ret;
     vector<uint8_t> packet;
 
@@ -548,9 +550,27 @@ void startDoResolve(void *p)
     if(!dc->d_mdp.d_header.rd)
       sr.setCacheOnly();
 
-    // if there is a RecursorLua active, and it 'took' the query in preResolve, we don't launch beginResolve
-    if(!t_pdl->get() || !(*t_pdl)->preresolve(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer)) {
-      res = sr.beginResolve(dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), dc->d_mdp.d_qclass, ret);
+    local.sin4.sin_family = dc->d_remote.sin4.sin_family;
+
+    lociter = g_listenSocketsAddresses.find(dc->d_socket);
+    if(lociter != g_listenSocketsAddresses.end()) {
+      local = lociter->second;
+    }
+    else {
+      socklen_t len = local.getSocklen();
+      getsockname(dc->d_socket, (sockaddr*)&local, &len); // if this fails, we're ok with it
+    }
+
+    // if there is a RecursorLua active, and it 'took' the query in preResolve, we don't launch beginResolve      
+    if(!t_pdl->get() || !(*t_pdl)->preresolve(dc->d_remote, local, dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer)) {
+      try {
+        res = sr.beginResolve(dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), dc->d_mdp.d_qclass, ret);
+      }
+      catch(ImmediateServFailException &e) {
+        L<<Logger::Error<<"Sending SERVFAIL during resolve of '"<<dc->d_mdp.d_qname<<"' because: "<<e.reason<<endl;
+
+        res = RCode::ServFail;
+      }
 
       if(t_pdl->get()) {
         if(res == RCode::NoError) {
@@ -559,12 +579,12 @@ void startDoResolve(void *p)
                   if(i->qtype.getCode() == dc->d_mdp.d_qtype && i->d_place == DNSResourceRecord::ANSWER)
                           break;
                 if(i == ret.end())
-                  (*t_pdl)->nodata(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
+                  (*t_pdl)->nodata(dc->d_remote,local, dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
               }
               else if(res == RCode::NXDomain)
-          (*t_pdl)->nxdomain(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
+          (*t_pdl)->nxdomain(dc->d_remote,local, dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
       
-      (*t_pdl)->postresolve(dc->d_remote, g_listenSocketsAddresses[dc->d_socket], dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
+      (*t_pdl)->postresolve(dc->d_remote,local, dc->d_mdp.d_qname, QType(dc->d_mdp.d_qtype), ret, res, &variableAnswer);
       }
     }
     
@@ -1022,7 +1042,8 @@ void makeTCPServerSockets()
     listen(fd, 128);
     deferredAdd.push_back(make_pair(fd, handleNewTCPQuestion));
     g_tcpListenSockets.push_back(fd);
-
+    // we don't need to update g_listenSocketsAddresses since it doesn't work for TCP/IP:
+    //  - fd is not that which we know here, but returned from accept()
     if(sin.sin4.sin_family == AF_INET) 
       L<<Logger::Error<<"Listening for TCP queries on "<< sin.toString() <<":"<<st.port<<endl;
     else
@@ -1161,7 +1182,7 @@ void doStats(void)
 static void houseKeeping(void *)
 try
 {
-  static __thread time_t last_stat, last_rootupdate, last_prune;
+  static __thread time_t last_stat, last_rootupdate, last_prune, last_secpoll;
   static __thread int cleanCounter=0;
   struct timeval now;
   Utility::gettimeofday(&now, 0);
@@ -1188,13 +1209,6 @@ try
     last_prune=time(0);
   }
   
-  if(!t_id) {
-    if(now.tv_sec - last_stat >= 1800) { 
-      doStats();
-      last_stat=time(0);
-    }
-  }
-  
   if(now.tv_sec - last_rootupdate > 7200) {
     SyncRes sr(now);
     sr.setDoEDNS0(true);
@@ -1209,13 +1223,23 @@ try
     else
       L<<Logger::Error<<"Failed to update . records, RCODE="<<res<<endl;
   }
+
+  if(!t_id) {
+    if(now.tv_sec - last_stat >= 1800) { 
+      doStats();
+      last_stat=time(0);
+    }
+
+    if(now.tv_sec - last_secpoll >= 3600) {
+      doSecPoll(&last_secpoll);
+    }
+  }
 }
 catch(PDNSException& ae)
 {
-  L<<Logger::Error<<"Fatal error: "<<ae.reason<<endl;
+  L<<Logger::Error<<"Fatal error in housekeeping thread: "<<ae.reason<<endl;
   throw;
 }
-;
 
 void makeThreadPipes()
 {
@@ -2099,6 +2123,7 @@ int main(int argc, char **argv)
     ::arg().set("experimental-webserver-port", "Port of webserver to listen on") = "8082";
     ::arg().set("experimental-webserver-password", "Password required for accessing the webserver") = "";
     ::arg().set("experimental-api-config-dir", "Directory where REST API stores config and zones") = "";
+    ::arg().set("experimental-api-key", "REST API Static authentication key (required for API use)") = "";
     ::arg().set("carbon-ourname", "If set, overrides our reported hostname for carbon stats")="";
     ::arg().set("carbon-server", "If set, send metrics in carbon (graphite) format to this server")="";
     ::arg().set("carbon-interval", "Number of seconds between carbon (graphite) updates")="30";
@@ -2155,6 +2180,7 @@ int main(int argc, char **argv)
     ::arg().set("minimum-ttl-override", "Set under adverse conditions, a minimum TTL")="0";
 
     ::arg().set("include-dir","Include *.conf files from this directory")="";
+    ::arg().set("security-poll-suffix","Domain name from which to query security update notifications")="secpoll.powerdns.com.";
 
     ::arg().setCmd("help","Provide a helpful message");
     ::arg().setCmd("version","Print version string");
