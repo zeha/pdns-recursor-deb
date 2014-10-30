@@ -1,3 +1,10 @@
+pdns-recursor (3.6.2-1) unstable; urgency=high
+
+  * Imported Upstream version 3.6.2, a bugfix release (Closes: #767368)
+  * Remove API key patch, which has been incorporated upstream.
+
+ -- Christian Hofstaedtler <zeha@debian.org>  Thu, 30 Oct 2014 17:22:19 +0100
+
 pdns-recursor (3.6.1-3) unstable; urgency=medium
 
   * Apply API key patch from upstream
