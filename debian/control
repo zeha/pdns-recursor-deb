@@ -5,8 +5,8 @@ Standards-Version: 3.9.6
 Maintainer: Debian PowerDNS Maintainers <pkg-pdns-maintainers@lists.alioth.debian.org>
 Uploaders: Matthijs Möhlmann <matthijs@cacholong.nl>, Marc Haber <mh+debian-packages@zugschlus.de>, Christian Hofstaedtler <zeha@debian.org>
 Build-Depends: debhelper (>= 9~), dh-systemd, quilt, dpkg-dev (>= 1.17.0~), libboost-dev, libboost-serialization-dev, liblua5.2-dev, pkg-config
-Vcs-Git: git://git.debian.org/pkg-pdns/pdns-recursor.git
-Vcs-Browser: http://git.debian.org/?p=pkg-pdns/pdns-recursor.git
+Vcs-Git: git://anonscm.debian.org/pkg-pdns/pdns-recursor.git
+Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-pdns/pdns-recursor.git
 Homepage: http://www.powerdns.com/
 
 Package: pdns-recursor
