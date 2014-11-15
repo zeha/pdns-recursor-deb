@@ -1,3 +1,15 @@
+pdns-recursor (3.6.2-2) unstable; urgency=medium
+
+  * Set package vendor for security status polling.
+    Requires directly including buildflags.mk so d/rules can modify
+    CXXFLAGS. (Closes: #767701)
+  * d/control: Update Vcs-Git and Vcs-Browser
+  * Fix "smoke" autopkgtest.
+    The test definition was incorrectly copied from the pdns-server
+    package.
+
+ -- Christian Hofstaedtler <zeha@debian.org>  Sat, 15 Nov 2014 17:42:26 +0100
+
 pdns-recursor (3.6.2-1) unstable; urgency=high
 
   * Imported Upstream version 3.6.2, a bugfix release (Closes: #767368)
