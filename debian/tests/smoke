@@ -2,8 +2,8 @@
 exec 2>&1
 set -ex
 
-cat <<EOF >/etc/powerdns/bindbackend.conf
-zone "example.org" { type master; file "/etc/powerdns/example.org.zone"; };
+cat <<EOF >>/etc/powerdns/recursor.conf
+auth-zones=example.org=/etc/powerdns/example.org.zone
 EOF
 
 cat <<EOF >/etc/powerdns/example.org.zone
@@ -12,7 +12,7 @@ example.org.           172800  IN      NS      ns1.example.org.
 smoke.example.org.     172800  IN      A       127.0.0.123
 EOF
 
-service pdns restart
+service pdns-recursor restart
 
 TMPFILE=$(mktemp)
 cleanup() {
