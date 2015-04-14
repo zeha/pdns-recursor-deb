@@ -13,7 +13,7 @@ DPKG_EXPORT_BUILDFLAGS = 1
 include /usr/share/dpkg/buildflags.mk
 
 # Vendor and version (after buildflags.mk so we don't overwrite CXXFLAGS)
-version := $(shell dpkg-parsechangelog -SVersion).$(shell dpkg-vendor --query Vendor)
+version := $(shell dpkg-parsechangelog | awk -F': ' '/Version:/{print $2}').$(shell dpkg-vendor --query Vendor)
 CXXFLAGS += -DPACKAGEVERSION='"$(version)"'
 
 # Use new build system
