@@ -18,7 +18,7 @@ CXXFLAGS += -DPACKAGEVERSION='"$(version)"'
 
 # Use new build system
 %:
-	dh $@ --with systemd --parallel
+	dh $@ --parallel
 
 override_dh_auto_install:
 	dh_auto_install -- STRIP_BINARIES=0
